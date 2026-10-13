@@ -18,7 +18,7 @@
 .ns-tools .tl-sec em{font-style:normal;color:var(--bd-2)}
 
 /* the strip
-   CREATE's tab strip, and it is a deliberate copy — ROOT.md §6 names the set,
+   CREATE's tab strip, and it is a deliberate copy — QUROS.md §6 names the set,
    because three copies of one shape are three things that can drift. Bordered
    rail, flat chips, a glider that slides under the live one, even shares of the
    width with max-content as the floor so a word is never squashed. */
@@ -293,6 +293,8 @@
 .ns-tools .tl-row .rw-bars i{flex:0 0 6px;height:var(--w,40%);min-height:3px;border-radius:1px;
   background:var(--s3)}
 .ns-tools .tl-row.good .rw-bars i{background:var(--tl-c)}
+/* a round filed under an area wears that area's colour, good day or not */
+.ns-tools .tl-row .rw-bars i[style*="--ar"]{background:var(--ar)}
 .ns-tools .tl-row .rw-holds{flex:1 1 auto;display:flex;flex-wrap:wrap;align-items:baseline;
   gap:calc(9px * var(--dens));color:var(--tx-2)}
 .ns-tools .tl-row .rw-holds b{font-weight:400}
@@ -487,3 +489,20 @@
 @media (prefers-reduced-motion:reduce){
   .ns-tools .tl-chart rect,.ns-tools .tl-pie path,.ns-tools .tl-rose path{transition:none}
 }
+
+/* ── focus areas ─────────────────────────────────────────────────────────────
+   What the round is for: one chip per area, the live one filled with its own
+   colour, today's count beside each. Above the readout because it is decided
+   before the round, not read after it. */
+.ns-tools .tl-areas{display:flex;flex-wrap:wrap;justify-content:center;gap:calc(6px * var(--dens));
+  margin:0 0 calc(14px * var(--dens))}
+.ns-tools .tl-area{display:inline-flex;align-items:center;gap:7px;cursor:pointer;
+  background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r-pill);color:var(--tx-2);
+  font:700 10px/1 var(--mono);letter-spacing:.07em;text-transform:var(--caps);
+  padding:calc(8px * var(--dens)) calc(12px * var(--dens))}
+.ns-tools .tl-area::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--ar, var(--y))}
+.ns-tools .tl-area b{font:800 11px/1 var(--head);color:var(--tx)}
+.ns-tools .tl-area.on{border-color:var(--ar, var(--y));color:var(--tx);
+  background:color-mix(in srgb, var(--ar, var(--y)) 16%, var(--s1))}
+.ns-tools .tl-week{margin-top:8px;font:400 10px/1.4 var(--mono);color:var(--tx-2);letter-spacing:.03em}
+.ns-tools .tl-week b{font-size:11px}

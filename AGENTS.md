@@ -1,4 +1,4 @@
-# Updating ROOT
+# Updating qurOS
 
 Use [UPDATE.md](UPDATE.md) for the workflow. Keep this file short; it is the
 entry point, not another changelog.
@@ -11,7 +11,7 @@ entry point, not another changelog.
 2. State the intended result and how you will verify it in a few lines. Proceed
    on routine choices; ask only when missing information materially changes scope.
 3. Search with `rg`, then read the owning function and its callers. Consult the
-   relevant sections of ROOT.md; do not load the whole manifest, changelog or
+   relevant sections of QUROS.md; do not load the whole manifest, changelog or
    test harness by default. Batch independent reads. Reuse what you have learned.
 4. Make the smallest complete change. Preserve existing user edits. Keep comments
    for contracts, surprising constraints and reasons; omit code narration and
@@ -20,7 +20,7 @@ entry point, not another changelog.
    run `node test/update.mjs check` for automatic validation. See UPDATE.md for
    visual checks and when the full suite is required. Fix failures; inspect the
    saved log before rerunning. Do not repeat a passing run without a new reason.
-6. Add one short entry to ROOT.md's Changelog. Update its current architecture
+6. Add one short entry to QUROS.md's Changelog. Update its current architecture
    sections only when a contract or file layout changes. Report the result,
    checks, backup path and any unverified behavior. Do not commit or publish
    unless the user's request includes it.
@@ -34,10 +34,16 @@ entry point, not another changelog.
 - Content belongs in Config; appearance/behavior in Prefs. Read preferences live.
   Use shared CSS tokens. Preserve Config's whole-branch override semantics.
 - Storage keys, identity keys and LOG's exported field names are contracts.
-  Check ROOT.md §§5–6 for migrations; §§8–9 for PLAN/DAY exports.
+  Check QUROS.md §§5–6 for migrations; §§8–9 for PLAN/DAY exports.
 - DAY's code ID is `cal`. PLAN resolves templates; CAL stores resolved days.
   Follow existing Todoist write boundaries and rollback behavior.
+- qurOS shares an origin, so localStorage, with root: every data key is shared
+  and stays a contract root also reads. The shell keys are qurOS's own
+  (`quros_prefs_v1`, `quros_tab`); never write `root_prefs_v1` or `root_tab`.
+- The flex principles (QUROS.md §11) are requirements, not style: nothing red
+  or "failed", no streaks, a minimum counts as done, one next action leads.
 - Add a regression check for a behavior fix. Test outcomes, not exact comments
   or an implementation copied into an assertion. jsdom cannot verify layout.
+  Root's checks are in test/harness.mjs, the flex system's in test/flex.mjs.
 
 No agent delegation by default. Use it only when the user requests it.

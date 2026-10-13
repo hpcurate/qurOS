@@ -305,6 +305,29 @@ function toggle(key, item) {
   if (!wasDone && routineDone(key)) tdAutoPush(key);
 }
 
+/* The same tick, asked for by another app (TODAY's chain, GYM's finished
+   session). A *set*, not a toggle: the caller says what it should be, so a
+   tick made twice from two places is still one tick. Only a routine and an
+   item DO actually has — a link pointing at an item renamed since is simply
+   not followed. Completing the routine fires the same Todoist close a tap on
+   the card does. */
+function setTick(key, item, on) {
+  if (!ROUTINES[key] || !(ROUTINES[key].items || []).includes(item)) return false;
+  if (!!(state[key] && state[key][item]) === !!on) return true;
+  if (!state[key]) state[key] = {};
+  const wasDone = routineDone(key);
+  if (on) state[key][item] = true; else delete state[key][item];
+  saveState();
+  if ($one('#s-checklist.on')) renderChecklist();
+  renderHome();
+  if (!wasDone && routineDone(key)) tdAutoPush(key);
+  return true;
+}
+const ticked = (key, item) => !!(state[key] && state[key][item]);
+/* Every routine item, for the link pickers in TODAY's and GYM's editors. */
+const routineItems = () => Object.keys(ROUTINES).flatMap(k =>
+  (ROUTINES[k].items || []).map(item => ({ routine: k, label: ROUTINES[k].label, item })));
+
 function go(id) {
   $all('.scr').forEach(s => s.classList.remove('on'));
   $id('s-' + id).classList.add('on');
@@ -2057,5 +2080,8 @@ return { go, renderSettings: renderTodoistSettings,
          renderMedia, toggleMediaTask, toggleMedia, toggleMediaHideDone, mediaTasks, deferToday,
          setMediaKind, setMediaQuery, cycleMediaSort, mediaPick,
          toggleBlockMove, selectBlock, moveBlocks,
-         toggleTodayMove, selectToday, selectAllToday };
+         toggleTodayMove, selectToday, selectAllToday,
+         /* for TODAY and GYM: DO keeps one day — its own today — and these
+            read and write ticks on it */
+         dayIso: () => TODAY, ticked, setTick, routineItems };
 })();

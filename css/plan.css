@@ -272,7 +272,7 @@
 /* The day stepper in the task sheet is the same control LOG's date arrows are,
    so it wears the same treatment: the display face at the title's weight, in
    title ink, with the title's hard offset copy behind it. Composed at the
-   point of use — see the note in log.css and ROOT.md §6. */
+   point of use — see the note in log.css and QUROS.md §6. */
 .ns-plan .dstep-a{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
        color:var(--tx);font:800 14px/1 var(--head);
        text-shadow:var(--title-sh-x) 0 0 var(--title-sh-c);

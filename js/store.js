@@ -233,7 +233,9 @@ function go(id) {
   if (id === 'home')     renderHome();
   if (id === 'items')    renderCategories();
   if (id === 'cat')      renderCategoryItems();
-  if (id === 'meals')    renderMeals();
+  if (id === 'meals')    { renderRecipes(); renderMeals(); }
+  if (id === 'recipe')   renderRecipe();
+  if (id === 'trips')    loadTrips();
   if (id === 'history')  renderHistory();
 }
 
@@ -1063,7 +1065,10 @@ async function syncTodoist() {
     const remote = await tdGetAll('/tasks', { project_id: t.projectId, section_id: t.sectionId });
 
     const remoteByKey = new Map();
-    remote.forEach(task => {
+    /* A trip is a parent task ("walk shop — thu 15 oct"), not something to
+       buy: it is the thing its items hang under. Everything under it is an
+       item like any other and comes across. */
+    remote.filter(task => !isTripTask(task)).forEach(task => {
       const { name, qty } = tdParseQty(task.content);
       const k = tdKey(name);
       if (k && !remoteByKey.has(k)) remoteByKey.set(k, { name, qty });
@@ -1180,10 +1185,494 @@ function renderSteps() {
     `<button class="cw-btn minus" onclick="STORE.addCart(${-n})">−${face(n)}</button>`).join('');
 }
 
+/* ── Recipes (qurOS spec §7) ──────────────────────────────────────────────
+   A small library of preset meals so dinner is not a decision: ingredients
+   scaled ×1 / ×2, a choice where a recipe has one (one meat a batch), a side
+   (the rice), steps with their own timers, and one button that puts what is
+   missing on the grocery list — in Todoist, under the trip it is for.
+
+   Everything here is delegated through `data-sact` rather than inline
+   handlers: a recipe's name is the user's own text and it lands in three
+   screens and a sheet. The older premade lists (`store.meals`) are kept
+   beside the recipes as "quick lists", untouched. */
+let RECIPES = [], SYN = null, PANTRY = null, TRIPS = [];
+const QTY_FRAC = { '½':0.5, '¼':0.25, '¾':0.75, '⅓':1/3, '⅔':2/3 };
+function readRecipes() {
+  const seen = new Set();
+  RECIPES = (Array.isArray(Config.get('store.recipes')) ? Config.get('store.recipes') : [])
+    .filter(r => r && typeof r === 'object' && /^[a-z0-9_-]{1,40}$/.test(String(r.key || '')))
+    .filter(r => !seen.has(r.key) && seen.add(r.key))
+    .map(r => ({
+      key: r.key, name: String(r.name || r.key).slice(0, 80),
+      serves: Math.max(1, Math.min(24, Math.round(+r.serves) || 2)),
+      usual: [0.5, 1, 2, 3].includes(+r.usual) ? +r.usual : 1,
+      note: String(r.note || '').slice(0, 240),
+      ing: (Array.isArray(r.ing) ? r.ing : []).filter(i => i && String(i.n || '').trim()).slice(0, 60).map(i => ({
+        q: isFinite(+i.q) && +i.q > 0 ? +i.q : null, u: String(i.u || '').slice(0, 16),
+        n: String(i.n).trim().slice(0, 60), opt: !!i.opt, pantry: !!i.pantry,
+        choice: String(i.choice || '').slice(0, 30), note: String(i.note || '').slice(0, 120) })),
+      steps: (Array.isArray(r.steps) ? r.steps : []).filter(s => s && String(s.t || '').trim()).slice(0, 40)
+        .map(s => ({ t: String(s.t).slice(0, 300), m: Math.max(0, Math.min(600, +s.m || 0)) })),
+      sides: (Array.isArray(r.sides) ? r.sides : []).filter(s => s && Array.isArray(s.options)).slice(0, 3)
+        .map(s => ({ label: String(s.label || 'side').slice(0, 30), options: s.options.map(String).slice(0, 6) })),
+    }));
+  SYN = null; PANTRY = null;
+  TRIPS = (Array.isArray(Config.get('store.trips')) ? Config.get('store.trips') : [])
+    .filter(t => t && /^[a-z0-9_-]{1,24}$/.test(String(t.key || '')) && String(t.label || '').trim())
+    .map(t => ({ key: t.key, label: String(t.label).trim().slice(0, 30) })).slice(0, 6);
+}
+readRecipes();
+const recipe = k => RECIPES.find(r => r.key === k) || null;
+
+/* Names, the way a shopping list hears them
+   "Onions x2", "onion" and "300 g onion" are one item; "bicarb soda" and
+   "baking soda" are one item. Quantities and plurals come off first, then the
+   synonym groups map each name to the first one in its group. A group is
+   matched on the whole phrase before plurals are touched — so "peppers" can
+   be bell peppers without "pepper" (the spice) becoming one too. */
+const singular = w => /oes$/.test(w) ? w.slice(0, -2) : /ies$/.test(w) && w.length > 4 ? w.slice(0, -3) + 'y'
+                    : /[^su]s$/.test(w) && w.length > 3 ? w.slice(0, -1) : w;
+const singularPhrase = s => s.split(' ').map(singular).join(' ');
+function baseName(raw) {
+  return tdKey(tdParseQty(raw).name)
+    .replace(/^\d+(?:\s*\d+)?\s*(?:g|kg|ml|cl|l|tbsp|tsp|cups?|cloves?|slices?|cans?|tins?|x)?\s+/, '')
+    .replace(/\s+\d+(?:\s*(?:g|kg|ml|cl|l))?$/, '').trim();
+}
+function synMap() {
+  if (SYN) return SYN;
+  SYN = new Map();
+  (Array.isArray(Config.get('store.synonyms')) ? Config.get('store.synonyms') : []).forEach(g => {
+    const names = (Array.isArray(g) ? g : String(g || '').split(',')).map(x => tdKey(x)).filter(Boolean);
+    if (!names.length) return;
+    const canon = singularPhrase(names[0]);
+    /* the names exactly as written: a plural taken off a *group member* is how
+       "peppers" (bell) swallowed "pepper" (the spice). The input's plural comes
+       off in canon(), against these. */
+    names.forEach(n => SYN.set(n, canon));
+  });
+  return SYN;
+}
+function canon(raw) {
+  const b = baseName(raw); if (!b) return '';
+  const m = synMap();
+  return m.get(b) || m.get(singularPhrase(b)) || singularPhrase(b);
+}
+function pantrySet() {
+  if (!PANTRY) PANTRY = new Set((Array.isArray(Config.get('store.pantry')) ? Config.get('store.pantry') : []).map(canon).filter(Boolean));
+  return PANTRY;
+}
+const isPantry = i => i.pantry || pantrySet().has(canon(i.n));
+
+/* A quantity, said the way a recipe says it: ½ rather than 0.5, 1¼ rather
+   than 1.25, and a whole number when it is one. */
+function qtyText(q) {
+  if (q == null) return '';
+  const whole = Math.floor(q + 1e-9), frac = q - whole;
+  const f = Math.abs(frac - 0.5) < 0.01 ? '½' : Math.abs(frac - 0.25) < 0.01 ? '¼' : Math.abs(frac - 0.75) < 0.01 ? '¾'
+          : Math.abs(frac - 1 / 3) < 0.01 ? '⅓' : Math.abs(frac - 2 / 3) < 0.01 ? '⅔' : frac > 0.01 ? null : '';
+  if (f === null) return String(Math.round(q * 100) / 100);
+  return (whole ? String(whole) : '') + f || '0';
+}
+function parseQty(s) {
+  const t = String(s || '').trim(); if (!t) return { q: null, u: '' };
+  const m = /^(\d+(?:[.,]\d+)?)?\s*([½¼¾⅓⅔]|\d+\/\d+)?\s*(.*)$/.exec(t);
+  if (!m || (!m[1] && !m[2])) return { q: null, u: t };
+  let q = m[1] ? parseFloat(m[1].replace(',', '.')) : 0;
+  if (m[2]) q += QTY_FRAC[m[2]] != null ? QTY_FRAC[m[2]] : (() => { const [a, b] = m[2].split('/').map(Number); return b ? a / b : 0; })();
+  return { q: q > 0 ? q : null, u: m[3].trim() };
+}
+
+/* What one recipe page has chosen: the scale, the choice in each group, the
+   side, and which optional / pantry lines are in. In memory — a recipe opened
+   tomorrow starts from its own defaults, which is what "not a decision" asks. */
+let rcp = null;
+function openRecipe(key) {
+  const r = recipe(key); if (!r) return;
+  const choices = {};
+  r.ing.forEach(i => { if (i.choice && !(i.choice in choices) && !i.opt) choices[i.choice] = i.n; });
+  rcp = { key, scale: r.usual, choices, sides: r.sides.map(s => s.options[0] || ''), include: {} };
+  go('recipe');
+}
+const ingId = (rk, i) => rk + '#' + i;
+/* One grocery line per item, however many recipes ask for it: garlic in the
+   burritos and garlic in the rice is one "garlic". A count with no unit goes
+   into the title ("onion x2"); everything with a unit goes into the task's
+   description, where it is a note about how much rather than a second item. */
+function groceryLines(lines) {
+  const byKey = new Map();
+  lines.filter(l => l.on).forEach(l => {
+    const k = canon(l.n); if (!k) return;
+    const cur = byKey.get(k) || { key: k, name: l.n, count: 0, notes: [], cat: classify(l.n).cat };
+    if (l.q != null && !l.u) cur.count += l.q;
+    if (l.q != null && l.u) cur.notes.push(`${qtyText(l.q)} ${l.u}`.trim() + (l.recipe ? ` (${l.recipe})` : ''));
+    else if (l.note) cur.notes.push(l.note);
+    byKey.set(k, cur);
+  });
+  return Array.from(byKey.values()).map(x => {
+    const n = Math.ceil(x.count - 1e-9);
+    return Object.assign(x, { qty: Math.max(1, n), title: n > 1 ? `${x.name} x${n}` : x.name,
+                              desc: x.notes.filter((v, i, a) => a.indexOf(v) === i).join(' · ') });
+  });
+}
+
+/* ── Cooked ──────────────────────────────────────────────────────────────── */
+function cooked(key) {
+  const r = recipe(key); if (!r) return;
+  const d = Shell.today();
+  if (!state.cooked || typeof state.cooked !== 'object') state.cooked = {};
+  const list = Array.isArray(state.cooked[d]) ? state.cooked[d] : [];
+  if (!list.includes(r.name)) list.push(r.name);
+  state.cooked[d] = list.slice(-12);
+  /* "meals eaten" is a recent question; a year of it is a store that only grows */
+  Object.keys(state.cooked).sort().slice(0, -60).forEach(k => delete state.cooked[k]);
+  saveState();
+  toast(`cooked · ${r.name}`);
+  renderRecipe();
+}
+const cookedOn = iso => (state.cooked && Array.isArray(state.cooked[iso]) ? state.cooked[iso].slice() : []);
+
+/* ── Step timers ─────────────────────────────────────────────────────────── */
+/* Wall-clock ends, filed under recipe and step, kept in the record so a
+   reload in the middle of fifteen minutes of rice still knows. */
+const tmKey = (rk, i) => rk + '|' + i;
+let tmTick = null;
+function timers() { if (!state.timers || typeof state.timers !== 'object') state.timers = {}; return state.timers; }
+function timerToggle(rk, i) {
+  const r = recipe(rk); if (!r || !r.steps[i] || !r.steps[i].m) return;
+  const t = timers(), k = tmKey(rk, i);
+  if (t[k]) delete t[k]; else t[k] = Date.now() + r.steps[i].m * 60000;
+  saveState(); syncTimers(); renderRecipe();
+}
+function syncTimers() {
+  const any = Object.keys(timers()).length > 0;
+  if (any && !tmTick) tmTick = setInterval(timerTick, 1000);
+  else if (!any && tmTick) { clearInterval(tmTick); tmTick = null; }
+}
+const mmss = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+function timerTick() {
+  const t = timers(); let changed = false;
+  Object.keys(t).forEach(k => {
+    if (t[k] - Date.now() > 0) return;
+    const [rk, i] = k.split('|'); const r = recipe(rk);
+    delete t[k]; changed = true;
+    toast(`${r ? r.name : 'recipe'} · step ${+i + 1} — time`);
+    if (window.Prefs && Prefs.tap) Prefs.tap(60);
+  });
+  if (changed) { saveState(); renderRecipe(); }
+  document.querySelectorAll('.ns-store [data-tm]').forEach(el => {
+    const end = t[el.dataset.tm]; if (end) el.textContent = mmss(end - Date.now());
+  });
+  syncTimers();
+}
+
+/* ── Drawing ─────────────────────────────────────────────────────────────── */
+const ARROW_R = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
+function renderRecipes() {
+  const box = $id('recipe-list'); if (!box) return;
+  const today = Shell.today();
+  box.innerHTML = RECIPES.length ? RECIPES.map(r => {
+    const n = r.ing.filter(i => !i.choice || r.ing.find(x => x.choice === i.choice) === i).length;
+    return `<button class="rc-card card" data-sact="recipe" data-k="${esc(r.key)}">
+      <span class="rc-name">${esc(r.name)}</span>
+      <span class="rc-meta">serves ${r.serves}${r.usual !== 1 ? ` · usually ×${r.usual}` : ''} · ${n} ingredients${r.steps.length ? ` · ${r.steps.length} steps` : ''}${cookedOn(today).includes(r.name) ? ' · <em>cooked today</em>' : ''}</span>
+      ${r.note ? `<span class="rc-note">${esc(r.note)}</span>` : ''}
+      <i class="rc-go">${ARROW_R}</i>
+    </button>`;
+  }).join('') : '<div class="li-empty">no recipes yet — settings → store → recipes</div>';
+}
+function renderRecipe() {
+  const box = $id('recipe-body'); if (!box || !rcp) return;
+  const r = recipe(rcp.key); if (!r) { go('meals'); return; }
+  $id('recipe-title').textContent = r.name;
+  const lines = linesOfAll(r);
+  const groups = {};
+  r.ing.forEach(i => { if (i.choice) (groups[i.choice] = groups[i.choice] || []).push(i); });
+  const t = timers();
+  const shop = groceryLines(lines);
+  box.innerHTML = `
+    ${r.note ? `<div class="rc-note big">${esc(r.note)}</div>` : ''}
+    <div class="rc-row"><span class="rc-lbl">how much</span>
+      <div class="rc-chips">${[0.5, 1, 2, 3].map(s => `<button class="rc-chip${rcp.scale === s ? ' on' : ''}" data-sact="scale" data-v="${s}">×${s === 0.5 ? '½' : s}</button>`).join('')}</div>
+      <span class="rc-serves">serves ${qtyText(r.serves * rcp.scale)}</span></div>
+    ${Object.keys(groups).map(g => {
+      const opt = groups[g].every(i => i.opt);
+      const cur = rcp.choices[g] !== undefined ? rcp.choices[g] : (opt ? null : groups[g][0].n);
+      return `<div class="rc-row"><span class="rc-lbl">${esc(g)}</span><div class="rc-chips">${
+        opt ? `<button class="rc-chip${cur == null ? ' on' : ''}" data-sact="choice" data-g="${esc(g)}" data-v="">none</button>` : ''}${
+        groups[g].map(i => `<button class="rc-chip${cur === i.n ? ' on' : ''}" data-sact="choice" data-g="${esc(g)}" data-v="${esc(i.n)}">${esc(i.n)}</button>`).join('')}</div></div>`;
+    }).join('')}
+    ${r.sides.map((s, si) => `<div class="rc-row"><span class="rc-lbl">${esc(s.label)}</span><div class="rc-chips">${
+      `<button class="rc-chip${!rcp.sides[si] ? ' on' : ''}" data-sact="side" data-i="${si}" data-v="">none</button>` +
+      s.options.map(o => recipe(o) ? `<button class="rc-chip${rcp.sides[si] === o ? ' on' : ''}" data-sact="side" data-i="${si}" data-v="${esc(o)}">${esc(recipe(o).name)}</button>` : '').join('')}</div></div>`).join('')}
+
+    <div class="sec"><span>ingredients <em>${shop.length} to shop for</em></span></div>
+    <div class="rc-ings">${lines.filter(l => !l.choice || l.on || l.why !== 'not this time').map(l => {
+      const tog = l.opt || (l.pantry && !l.choice);
+      return `<div class="rc-ing${l.on ? '' : ' off'}">
+        <span class="rc-q">${esc([qtyText(l.q), l.u].filter(Boolean).join(' '))}</span>
+        <span class="rc-n">${esc(l.n)}${l.from ? `<small>${esc(l.from)}</small>` : ''}${l.note ? `<small>${esc(l.note)}</small>` : ''}</span>
+        ${tog ? `<button class="rc-tog${l.on ? ' on' : ''}" data-sact="inc" data-id="${esc(l.id)}" role="switch" aria-checked="${l.on}"
+           aria-label="include ${esc(l.n)}">${l.on ? 'in' : l.pantry ? 'have it' : 'skip'}</button>` : ''}
+      </div>`;
+    }).join('')}</div>
+
+    ${r.steps.length ? `<div class="sec"><span>steps</span></div>
+    <ol class="rc-steps">${r.steps.map((s, i) => { const k = tmKey(r.key, i), end = t[k];
+      return `<li><span>${esc(s.t)}</span>${s.m ? `<button class="rc-timer${end ? ' on' : ''}" data-sact="timer" data-k="${esc(r.key)}" data-i="${i}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M10 2.5h4"/></svg>
+        <b${end ? ` data-tm="${esc(k)}"` : ''}>${end ? mmss(end - Date.now()) : s.m + ' min'}</b></button>` : ''}</li>`; }).join('')}</ol>`
+      : `<div class="li-empty">no steps written yet</div>`}
+
+    <div class="rc-acts">
+      <button class="rc-btn go" data-sact="shop"${shop.length ? '' : ' disabled'}>add ${shop.length} to groceries${ARROW_R}</button>
+      <button class="rc-btn" data-sact="cooked">${cookedOn(Shell.today()).includes(r.name) ? 'cooked today ✓' : 'cooked it'}</button>
+    </div>`;
+  syncTimers();
+}
+/* The recipe's own lines, then each chosen side's under its label. */
+function linesOfAll(r) {
+  const own = [];
+  const sel = { choices: rcp.choices, include: rcp.include, sides: rcp.sides };
+  const push = (rr, from, scale) => rr.ing.forEach((i, ix) => {
+    const id = ingId(rr.key, ix);
+    let on = true, why = '';
+    if (i.choice) {
+      const group = rr.ing.filter(x => x.choice === i.choice);
+      const opt = group.every(x => x.opt);
+      const pick = rr === r && sel.choices[i.choice] !== undefined ? sel.choices[i.choice] : (opt ? null : group[0].n);
+      on = pick === i.n; why = on ? '' : 'not this time';
+    } else if (i.opt) { on = !!sel.include[id]; why = on ? '' : 'optional'; }
+    else if (isPantry(i)) { on = !!sel.include[id]; why = on ? '' : 'in the cupboard'; }
+    own.push({ id, from, n: i.n, q: i.q == null ? null : i.q * scale, u: i.u, note: i.note, opt: i.opt,
+               pantry: isPantry(i), choice: i.choice, on, why, recipe: rr.name });
+  });
+  push(r, '', rcp.scale);
+  r.sides.forEach((s, si) => {
+    const side = recipe(sel.sides[si]);
+    /* A side is cooked for the same table, so it follows the main recipe's
+       servings rather than its own ×: four burritos want four servings of rice. */
+    if (side && side.key !== r.key) push(side, s.label + ' · ' + side.name, (r.serves * rcp.scale) / side.serves);
+  });
+  return own;
+}
+
+/* ── The grocery sheet ──────────────────────────────────────────────────────
+   What is about to be added, what is already on the list (here or in
+   Todoist), and which trip it is for. Nothing is sent until "add" is pressed,
+   and a line already on the list is never sent twice. */
+let gs = null;       // { lines, remote, trips, busy, pick, when, date, err }
+const tripRe = () => TRIPS.length ? new RegExp('^\\s*(' + TRIPS.map(t => t.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b', 'i') : null;
+const isTripTask = task => { const re = tripRe(); return !!(re && re.test(String(task && task.content || ''))); };
+const tripKindOf = content => { const s = String(content || '').toLowerCase().trim();
+  return TRIPS.find(t => s.startsWith(t.label.toLowerCase())) || null; };
+function whenWord(iso) {
+  const d = new Date(iso + 'T12:00:00');
+  return isNaN(d) ? iso : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).toLowerCase();
+}
+function openShop() {
+  const r = recipe(rcp && rcp.key); if (!r) return;
+  const lines = groceryLines(linesOfAll(r));
+  gs = { lines, recipe: r.name, remote: null, trips: [], busy: !!Creds.token(), pick: Creds.token() ? 'new:' + (TRIPS[0] ? TRIPS[0].key : '') : 'local',
+         when: 'today', date: Shell.today(), err: '' };
+  $id('gs-back').classList.add('on'); $id('gsheet').classList.add('on');
+  paintShop();
+  if (Creds.token()) readTrips().then(res => {
+    if (!gs) return;
+    gs.busy = false; gs.remote = res.tasks; gs.trips = res.trips; gs.err = '';
+    if (gs.trips.length) gs.pick = 'trip:' + gs.trips[0].id;
+    paintShop();
+  }).catch(e => { if (!gs) return; gs.busy = false; gs.err = e.message || 'Todoist did not answer'; gs.pick = 'local'; paintShop(); });
+}
+function closeShop() { gs = null; $id('gs-back').classList.remove('on'); $id('gsheet').classList.remove('on'); }
+/* Every open task in the section — trips, what is under them and what is
+   loose — and the trips among them, each with the items it already holds. */
+async function readTrips() {
+  const t = await tdResolveTarget();
+  const all = await tdGetAll('/tasks', { project_id: t.projectId });
+  const tripIds = new Set(all.filter(x => x.section_id === t.sectionId && !x.parent_id && isTripTask(x)).map(x => x.id));
+  const tasks = all.filter(x => x.section_id === t.sectionId || tripIds.has(x.parent_id));
+  const trips = tasks.filter(x => tripIds.has(x.id)).map(x => ({
+    id: x.id, content: x.content, due: (x.due && x.due.date) ? String(x.due.date).slice(0, 10) : '',
+    kind: (tripKindOf(x.content) || {}).key || '', items: tasks.filter(c => c.parent_id === x.id) }))
+    .sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'));
+  return { target: t, tasks, trips, loose: tasks.filter(x => !x.parent_id && !tripIds.has(x.id)) };
+}
+/* Which of the lines are already somewhere on the list. */
+function alreadyKeys() {
+  const keys = new Set(state.list.map(i => canon(i.name)).filter(Boolean));
+  (gs && gs.remote || []).filter(x => !isTripTask(x)).forEach(x => { const k = canon(x.content); if (k) keys.add(k); });
+  return keys;
+}
+function paintShop() {
+  const box = $id('gs-body'); if (!box || !gs) return;
+  const have = alreadyKeys();
+  const toAdd = gs.lines.filter(l => !have.has(l.key)), dup = gs.lines.filter(l => have.has(l.key));
+  const tok = !!Creds.token();
+  const opt = (v, label, sub) => `<button class="gs-opt${gs.pick === v ? ' on' : ''}" data-sact="gs-pick" data-v="${esc(v)}">
+      <span>${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</button>`;
+  box.innerHTML = `
+    <div class="gs-sum"><b>${toAdd.length}</b> to add${dup.length ? ` · <span>${dup.length} already on the list</span>` : ''}</div>
+    <div class="gs-lines">${toAdd.map(l => `<span class="gs-l">${esc(l.title)}${l.desc ? `<small>${esc(l.desc)}</small>` : ''}</span>`).join('')}
+      ${dup.map(l => `<span class="gs-l dup">${esc(l.name)}<small>already on the list</small></span>`).join('')}</div>
+    <div class="gs-h">which trip</div>
+    ${gs.busy ? '<div class="gs-fine">reading Todoist…</div>' : ''}
+    ${gs.err ? `<div class="gs-fine bad">${esc(gs.err)} — it can still go on this phone's list</div>` : ''}
+    <div class="gs-opts">
+      ${tok && !gs.err ? gs.trips.map(t => opt('trip:' + t.id, t.content, `${t.items.length} item${t.items.length === 1 ? '' : 's'} on it`)).join('') : ''}
+      ${tok && !gs.err ? TRIPS.map(t => opt('new:' + t.key, `new ${t.label}`, '— ' + whenWord(gs.date))).join('') : ''}
+      ${tok && !gs.err ? opt('loose', 'no trip', 'loose in the section') : ''}
+      ${opt('local', "this phone's list only", tok ? 'not sent to Todoist' : 'no Todoist key saved')}
+    </div>
+    ${gs.pick.startsWith('new:') ? `<div class="gs-when">${['today', 'tomorrow'].map(w =>
+        `<button class="rc-chip${gs.when === w ? ' on' : ''}" data-sact="gs-when" data-v="${w}">${w}</button>`).join('')}
+      <input type="date" id="gs-date" value="${esc(gs.date)}" aria-label="trip date"></div>` : ''}
+    <button class="rc-btn go wide" data-sact="gs-go"${toAdd.length && !gs.busy ? '' : ' disabled'}>add ${toAdd.length}</button>`;
+}
+const dayAfter = (iso, n) => { const p = iso.split('-').map(Number); const d = new Date(p[0], p[1] - 1, p[2] + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+async function shopGo(btn) {
+  if (!gs || gs.busy) return;
+  const have = alreadyKeys();
+  const toAdd = gs.lines.filter(l => !have.has(l.key));
+  if (!toAdd.length) { closeShop(); return; }
+  /* Always onto this phone's list as well: the shop happens in STORE, and
+     STORE's own sync matches these against Todoist by name, so nothing is
+     doubled when it next runs. */
+  const local = () => { toAdd.forEach(l => { const ex = state.list.find(i => canon(i.name) === l.key);
+    if (ex) ex.qty = Math.max(ex.qty || 1, l.qty); else state.list.push({ name: l.name, cat: l.cat, qty: l.qty, checked: false }); });
+    saveState(); renderList(); };
+  if (gs.pick === 'local' || !Creds.token()) { local(); toast(`+ ${toAdd.length} · on this phone's list`); closeShop(); return; }
+  gs.busy = true; if (btn) { btn.disabled = true; btn.textContent = 'sending…'; }
+  try {
+    const t = await tdResolveTarget();
+    let parent = null;
+    if (gs.pick.startsWith('trip:')) parent = gs.pick.slice(5);
+    else if (gs.pick.startsWith('new:')) {
+      const kind = TRIPS.find(x => x.key === gs.pick.slice(4)) || TRIPS[0];
+      const dateEl = $id('gs-date');
+      const iso = gs.when === 'tomorrow' ? dayAfter(Shell.today(), 1) : gs.when === 'date' && dateEl && dateEl.value ? dateEl.value : Shell.today();
+      const made = await tdFetch('/tasks', { method: 'POST', body: JSON.stringify({
+        content: `${kind.label} — ${whenWord(iso)}`, project_id: t.projectId, section_id: t.sectionId, due_date: iso }) });
+      parent = made && made.id;
+    }
+    let sent = 0, failed = 0;
+    for (const l of toAdd) {
+      const body = { content: l.title };
+      if (l.desc) body.description = l.desc;
+      if (parent) body.parent_id = parent; else { body.project_id = t.projectId; body.section_id = t.sectionId; }
+      try { await tdFetch('/tasks', { method: 'POST', body: JSON.stringify(body) }); sent++; } catch { failed++; }
+    }
+    local();
+    toast(failed ? `↑ ${sent} sent · ${failed} failed — all on this phone's list` : `↑ ${sent} sent to ${parent ? 'the trip' : 'the list'}`);
+    closeShop();
+  } catch (e) {
+    local();
+    toast('Todoist failed — added to this phone\'s list');
+    if (gs) { gs.busy = false; gs.err = e.message || 'failed'; paintShop(); }
+  }
+}
+
+/* ── Trips ───────────────────────────────────────────────────────────────── */
+/* The trips as Todoist has them: each with its date and what is on it, and
+   what is loose in the section. An item moves between them with one tap —
+   Todoist's own move, drawn first and put back exactly if the call fails. */
+let tv = null;       // { busy, err, trips, loose, at }
+async function loadTrips(force) {
+  if (!Creds.token()) { tv = { busy: false, err: 'no Todoist key saved — settings → data', trips: [], loose: [] }; renderTrips(); return; }
+  if (tv && tv.busy) return;
+  tv = Object.assign(tv || { trips: [], loose: [] }, { busy: true, err: '' }); renderTrips();
+  try {
+    const r = await readTrips();
+    tv = { busy: false, err: '', trips: r.trips, loose: r.loose.filter(x => !isTripTask(x)), at: Date.now() };
+  } catch (e) { tv = Object.assign(tv, { busy: false, err: e.message || 'Todoist did not answer' }); }
+  renderTrips();
+}
+function renderTrips() {
+  const box = $id('trips-body'); if (!box) return;
+  if (!tv) { box.innerHTML = ''; return; }
+  const dest = (task, here) => {
+    const opts = tv.trips.filter(t => t.id !== here).map(t => `<option value="trip:${esc(t.id)}">→ ${esc(t.content)}</option>`).join('') +
+                 (here ? '<option value="loose">→ no trip</option>' : '');
+    return opts ? `<select class="tr-move" data-sact-change="move" data-id="${esc(task.id)}" aria-label="move ${esc(task.content)}">
+      <option value="">move…</option>${opts}</select>` : '';
+  };
+  const row = (task, here) => `<div class="tr-item"><span>${esc(task.content)}${task.description ? `<small>${esc(task.description)}</small>` : ''}</span>${dest(task, here)}</div>`;
+  box.innerHTML = `${tv.busy ? '<div class="gs-fine">reading Todoist…</div>' : ''}
+    ${tv.err ? `<div class="gs-fine bad">${esc(tv.err)}</div>` : ''}
+    ${tv.trips.map(t => `<div class="tr-trip card">
+        <div class="tr-h"><b>${esc(t.content)}</b><em>${t.items.length} item${t.items.length === 1 ? '' : 's'}${t.due ? ' · due ' + esc(whenWord(t.due)) : ''}</em></div>
+        ${t.items.map(i => row(i, t.id)).join('') || '<div class="li-empty">nothing on it yet</div>'}
+      </div>`).join('')}
+    ${tv.loose.length ? `<div class="sec"><span>no trip <em>${tv.loose.length}</em></span></div>
+      <div class="tr-trip card loose">${tv.loose.map(i => row(i, '')).join('')}</div>` : ''}
+    ${!tv.busy && !tv.err && !tv.trips.length && !tv.loose.length ? '<div class="li-empty">the grocery section is empty</div>' : ''}
+    <div class="sec"><span>a new trip</span></div>
+    <div class="rc-acts">${TRIPS.map(t => `<button class="rc-btn" data-sact="trip-new" data-k="${esc(t.key)}">+ ${esc(t.label)} · today</button>`).join('')}
+      <button class="rc-btn" data-sact="trips-refresh">refresh</button></div>`;
+}
+async function moveItem(id, to) {
+  if (!tv || !to) return;
+  const all = tv.trips.flatMap(t => t.items.map(i => ({ i, from: t }))).concat(tv.loose.map(i => ({ i, from: null })));
+  const hit = all.find(x => x.i.id === id); if (!hit) return;
+  const was = JSON.parse(JSON.stringify({ trips: tv.trips, loose: tv.loose }));
+  const target = to === 'loose' ? null : tv.trips.find(t => 'trip:' + t.id === to);
+  if (to !== 'loose' && !target) return;
+  if (hit.from) hit.from.items = hit.from.items.filter(x => x.id !== id); else tv.loose = tv.loose.filter(x => x.id !== id);
+  if (target) target.items.push(Object.assign({}, hit.i, { parent_id: target.id })); else tv.loose.push(Object.assign({}, hit.i, { parent_id: null }));
+  renderTrips();
+  try {
+    const t = await tdResolveTarget();
+    await tdFetch(`/tasks/${encodeURIComponent(id)}/move`, { method: 'POST',
+      body: JSON.stringify(target ? { parent_id: target.id } : { section_id: t.sectionId }) });
+    toast(target ? `moved to ${target.content}` : 'moved off the trip');
+  } catch (e) {
+    tv.trips = was.trips; tv.loose = was.loose; renderTrips();
+    toast('move failed — ' + (e.message || 'Todoist did not answer'));
+  }
+}
+async function newTrip(kindKey) {
+  const kind = TRIPS.find(x => x.key === kindKey); if (!kind || !Creds.token()) return;
+  try {
+    const t = await tdResolveTarget(), iso = Shell.today();
+    await tdFetch('/tasks', { method: 'POST', body: JSON.stringify({
+      content: `${kind.label} — ${whenWord(iso)}`, project_id: t.projectId, section_id: t.sectionId, due_date: iso }) });
+    toast(`${kind.label} — ${whenWord(iso)}`);
+    loadTrips(true);
+  } catch (e) { toast('could not make the trip — ' + (e.message || 'Todoist did not answer')); }
+}
+
+document.addEventListener('click', ev => {
+  const t = ev.target.closest && ev.target.closest('.ns-store [data-sact]');
+  if (!t || t.disabled) return;
+  const a = t.dataset.sact;
+  if (a === 'recipe')   { openRecipe(t.dataset.k); return; }
+  if (a === 'scale')    { rcp.scale = +t.dataset.v || 1; renderRecipe(); return; }
+  if (a === 'choice')   { rcp.choices[t.dataset.g] = t.dataset.v === '' ? null : t.dataset.v; renderRecipe(); return; }
+  if (a === 'side')     { rcp.sides[+t.dataset.i] = t.dataset.v; renderRecipe(); return; }
+  if (a === 'inc')      { rcp.include[t.dataset.id] = !rcp.include[t.dataset.id]; renderRecipe(); return; }
+  if (a === 'timer')    { timerToggle(t.dataset.k, +t.dataset.i); return; }
+  if (a === 'cooked')   { cooked(rcp && rcp.key); return; }
+  if (a === 'shop')     { openShop(); return; }
+  if (a === 'gs-close') { closeShop(); return; }
+  if (a === 'gs-pick')  { gs.pick = t.dataset.v; paintShop(); return; }
+  if (a === 'gs-when')  { gs.when = t.dataset.v; gs.date = t.dataset.v === 'tomorrow' ? dayAfter(Shell.today(), 1) : Shell.today(); paintShop(); return; }
+  if (a === 'gs-go')    { shopGo(t); return; }
+  if (a === 'trips')    { go('trips'); return; }
+  if (a === 'trips-refresh') { loadTrips(true); return; }
+  if (a === 'trip-new') { newTrip(t.dataset.k); return; }
+});
+document.addEventListener('change', ev => {
+  const el = ev.target;
+  if (!el || !el.closest || !el.closest('.ns-store')) return;
+  if (el.dataset.sactChange === 'move') { moveItem(el.dataset.id, el.value); return; }
+  if (el.id === 'gs-date' && gs) { gs.when = 'date'; gs.date = el.value || Shell.today(); paintShop(); }
+});
+
 // Boot
 loadState();
 renderSteps();
 renderHome();
+syncTimers();   // a recipe timer left running across a reload keeps running
 
 /* An edited aisle, meal or step amount redraws the list and the tiles at once.
    Items already on the list keep the category they were filed under; only ones
@@ -1192,19 +1681,28 @@ Config.subscribe(path => {
   if (path !== '*' && !String(path).startsWith('store.')) return;
   CATEGORIES = Config.get('store.categories');
   MEALS      = Config.get('store.meals');
+  readRecipes();
   VOCAB = null;   // the categoriser's vocabulary is built from CATEGORIES; rebuild it
   let moved = false;
   state.list.forEach(it => { if (!CATEGORIES[it.cat]) { it.cat = 'manual'; moved = true; } });
   if (moved) saveState();
   renderSteps();
   renderHome();
+  if ($id('s-meals') && $id('s-meals').classList.contains('on')) renderRecipes();
+  if ($id('s-recipe') && $id('s-recipe').classList.contains('on')) renderRecipe();
 });
 
 // the currency mark reaches nine different readouts and the date label follows
 // the date format; one redraw covers them all
 Prefs.subscribe(k => { if (k === 'currency' || k === 'dateFormat' || k === '*') renderHome(); });
 
-Shell.register('store', { home: () => go('home') });   // the STORE tab tapped while on STORE
+Shell.register('store', {
+  home: () => go('home'),   // the STORE tab tapped while on STORE
+  search: q => RECIPES.filter(r => r.name.toLowerCase().includes(q) ||
+                                   r.ing.some(i => i.n.toLowerCase().includes(q))).map(r => ({
+    title: r.name, sub: 'store · recipe',
+    go: () => { Shell.TABS.includes('store') ? Shell.go('store') : Shell.open('store'); openRecipe(r.key); } })),
+});
 
 /* A shopping day, for anything outside STORE reading the day back — DATA is
    the only caller. A trip is what was actually finished, so it is the thing
@@ -1218,7 +1716,16 @@ function tripsOn(iso) {
            items: rows.reduce((a, t) => a + (Array.isArray(t.items) ? t.items.length : 0), 0) };
 }
 
-return { tripsOn, go, addCart, resetCart, togglePin, openPad, closePad, padKey, padBack, padClear,
+return { tripsOn,
+         /* for TODAY's export: what was cooked from the recipe library that day */
+         cookedOn,
+         /* the recipe library and the grocery maths, for the harness and search */
+         openRecipe, recipes: () => RECIPES.map(r => r.key), canon,
+         groceryFor: (key, scale) => { const r = recipe(key); if (!r) return [];
+           const was = rcp; rcp = { key, scale: scale || r.usual, choices: {}, sides: r.sides.map(x => x.options[0] || ''), include: {} };
+           const out = groceryLines(linesOfAll(r)); rcp = was; return out; },
+         openShop, closeShop, shopGo, loadTrips, moveItem, tripsState: () => tv && JSON.parse(JSON.stringify(tv)),
+         go, addCart, resetCart, togglePin, openPad, closePad, padKey, padBack, padClear,
          padCount, padApply, openCartLog, closeCartLog,
          addManual, toggleChecked, setQty, deleteItem, confirmClearList,
          saveTrip, openTripName, closeTripName, confirmTripName,

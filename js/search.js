@@ -14,7 +14,7 @@ const esc = s => String(s == null ? '' : s)
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const fold = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
-const APP_NAMES = { do:'DO', log:'LOG', plan:'PLAN', store:'STORE', tend:'TEND', track:'TRACK', learn:'LEARN', cal:'DAY',
+const APP_NAMES = { today:'TODAY', gym:'GYM', do:'DO', log:'LOG', plan:'PLAN', store:'STORE', tend:'TEND', track:'TRACK', learn:'LEARN', cal:'DAY',
                     create:'CREATE', tools:'TOOLS' };
 
 /* What Config holds, flattened
@@ -23,6 +23,17 @@ const APP_NAMES = { do:'DO', log:'LOG', plan:'PLAN', store:'STORE', tend:'TEND',
    that is the one place the thing can actually be changed. A path missing from
    Config (an app's branch reset to nothing) simply yields nothing. */
 const CONTENT = [
+  /* TODAY's three lists, GYM's program, the pomodoro areas and the recipes:
+     each row says whose it is, since "shower" is a chain step, a hygiene step
+     and a DO item all at once. */
+  { path:'today.chain',        app:'today', rows: v => (Array.isArray(v) ? v : []).map(s => ({ name: s.label, sub:'morning chain step' })) },
+  { path:'today.hygiene',      app:'today', rows: v => (Array.isArray(v) ? v : []).map(s => ({ name: s.label, sub:'hygiene step' })) },
+  { path:'today.prep',         app:'today', rows: v => (Array.isArray(v) ? v : []).map(s => ({ name: s.label, sub:'evening prep' })) },
+  { path:'gym.days',           app:'gym',
+    rows: v => (Array.isArray(v) ? v : []).flatMap(d => [{ name: d.label, sub:'program day' }]
+      .concat((d.exercises || []).map(e => ({ name: e.name, sub: 'exercise · ' + d.label })))) },
+  { path:'tools.areas',        app:'tools', rows: v => (Array.isArray(v) ? v : []).map(a => ({ name: a.label, sub:'focus area' })) },
+  { path:'store.recipes',      app:'store', rows: v => (Array.isArray(v) ? v : []).map(r => ({ name: r.name, sub:'recipe' })) },
   { path:'do.routines',        app:'do',    what:'routine',
     rows: v => Object.keys(v || {}).flatMap(k => [{ name: v[k].label, sub:'routine' }]
       .concat((v[k].items || []).map(i => ({ name: i, sub: 'routine · ' + v[k].label })))) },

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LOCAL = path.join(ROOT, '.update');
 const IGNORED = new Set(['.git', 'node_modules', '.update']);
-const APPS = ['do', 'log', 'plan', 'store', 'tend', 'track', 'learn', 'cal', 'create', 'tools'];
+const APPS = ['today', 'do', 'log', 'gym', 'plan', 'store', 'tend', 'track', 'learn', 'cal', 'create', 'tools'];
 
 export function inventory(root, ignored = IGNORED) {
   const result = Object.create(null);
@@ -137,9 +137,9 @@ function context(area) {
   } else if (shared.includes(area)) console.log(`Read: js/${area}.js; trace only affected callers and settings.`);
   else if (area === 'styles') console.log('Read: css/tokens.css, the affected app stylesheet; css/themes.css for preset overrides.');
   else if (area === 'tests') console.log('Read: test/package.json and the relevant check/setup in test/harness.mjs.');
-  else if (area === 'docs') console.log('Read: AGENTS.md, UPDATE.md and the affected section of ROOT.md.');
+  else if (area === 'docs') console.log('Read: AGENTS.md, UPDATE.md and the affected section of QUROS.md.');
   else console.log('Start with the owning js/<app>.js function, its CSS and markup. Use UPDATE.md for the file-reading order.');
-  console.log('Contracts: ROOT.md §§3–6; PLAN/DAY exports §§8–9. Read relevant sections, not the full history.');
+  console.log('Contracts: QUROS.md §§3–6; PLAN/DAY exports §§8–9. Read relevant sections, not the full history.');
   const git = spawnSync('git', ['status', '--short'], { cwd: ROOT, encoding: 'utf8' });
   if (git.status !== 0) throw new Error('Cannot read Git status: ' + (git.stderr || git.error?.message));
   console.log(git.stdout.trim() || 'Git working tree clean.');
@@ -192,6 +192,10 @@ async function main(args) {
       const full = run([path.join(ROOT, 'test/harness.mjs')], 'full.log');
       console.log(summarize(full.output) || 'Full harness exited successfully.');
       console.log('Full log: ' + full.log);
+      /* the flex system's own checks — TODAY, GYM, areas, recipes, the links */
+      const flex = run([path.join(ROOT, 'test/flex.mjs')], 'flex.log');
+      console.log(summarize(flex.output) || 'Flex checks exited successfully.');
+      console.log('Flex log: ' + flex.log);
     } else console.log('Quick checks only; full behavior suite not run.');
     const runnerTests = path.join(ROOT, 'test/update.test.mjs');
     if (mode === 'full' && fs.existsSync(runnerTests)) {

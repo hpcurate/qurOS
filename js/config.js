@@ -10,6 +10,124 @@ const KEY = 'root_config_v1';
 /* Defaults */
 const DEFAULTS = {
 
+  /* TODAY — the flex system (qurOS spec, Oct 2026)
+     A day that bends instead of breaking: two clock times, a few small goals,
+     an ordered morning chain whose every step has a full version and a
+     minimum, and a bad-day switch that collapses the lot to the minimums.
+     What was done lives in `today_v1`; what the day is *made of* lives here.
+
+     Step, hygiene and prep `key`s are identities — the day record files ticks
+     under them — so the editors keep a key across a rename. `link` says where
+     a step's state can also come from:
+       wake        LOG's wake-up time (or TODAY's own "up" tap), against `anchors.wake`
+       gym         a session GYM logged that day — a minimum session is the minimum
+       hygiene     the hygiene chain below: shower alone is the minimum, all of it is full
+       pom:<area>  TOOLS' finished focus rounds tagged with that area
+       (blank)     nothing — a tick is the only source
+     `do` mirrors a tick into one of DO's routine items, `routine|item`, so a
+     step ticked here is ticked on DO's card too and DO's own Todoist close
+     still fires. A link to an item DO no longer has is simply not followed. */
+  today: {
+    anchors: {
+      wake: '06:00',
+      /* Unset on purpose: the spec leaves the sleep target open (§12). A blank
+         target draws no line and judges nothing. */
+      sleep: '',
+      /* From here the next action is the evening's, not the morning's. */
+      eveningFrom: '18:00',
+      /* When a day ends. Midnight by default; set it later and an evening dump
+         written at 00:40 still lands on the day it is about. */
+      dayEnds: '00:00',
+      /* Minutes past the wake target that still count as on time. */
+      grace: 15,
+    },
+    goals: {
+      cap: 3,
+      weekCap: 3,
+      hint: 'Make it small enough to start in 2 minutes.',
+      /* Offer yesterday's unfinished goals as carry / drop. Off, they simply
+         stay where they were — nothing is ever moved without a tap. */
+      carry: true,
+    },
+    chain: [
+      { key:'wake',   label:'wake',               full:'up at the wake target',                min:'out of bed',               link:'wake' },
+      { key:'walk',   label:'kamo walk',          full:'full walk — talk to qurOS: plan the day, brain-dump', min:'short walk', link:'', do:'fit|kamo walk m' },
+      { key:'gym',    label:'gym',                full:'the full A/B session',                 min:'bike 10 min + 1 exercise', link:'gym', do:'fit|exercise' },
+      { key:'shower', label:'shower chain',       full:'the whole hygiene chain',              min:'shower',                   link:'hygiene' },
+      { key:'cap',    label:'first CAP pomodoro', full:'1+ pomodoros',                         min:'1 pomodoro',               link:'pom:cap' },
+    ],
+    /* The chain that runs straight after the gym: one sequence, not six
+       habits. `min` marks the minimum (the shower); `optional` steps never
+       count against "full" — shaving is not daily — and `every` is how many
+       days apart it is usually done, which only ever changes a hint. */
+    hygiene: [
+      { key:'shower', label:'shower',       min:true, do:'fix|shower' },
+      { key:'face',   label:'face wash',    do:'fix|face morning' },
+      { key:'teeth',  label:'teeth',        do:'fix|teeth morning' },
+      { key:'floss',  label:'floss' },
+      { key:'tongue', label:'tongue clean', do:'fix|tongue morning' },
+      { key:'shave',  label:'shave',        optional:true, every:3 },
+    ],
+    /* The shower helper: a short, fixed time — door open, lukewarm water,
+       music on. A timer you can see the end of. */
+    showerMins: 5,
+    showerNote: 'Door open, lukewarm water, music on. Five minutes is the whole job.',
+    prep: [
+      { key:'walkkit', label:'kamo walk items by the door', do:'plan|kamo walk prep' },
+      { key:'gymbag',  label:'gym bag ready',               do:'plan|gym prep' },
+    ],
+    /* A bad day is logged, never judged. It collapses every habit to its
+       minimum and hides everything else; these two bring a section back. */
+    badDay: { keepGoals:false, keepFocus:false,
+              note:'Minimums count. One thing, then the next.' },
+    /* What the evening export carries, section by section. */
+    export: { anchors:true, goals:true, weekly:true, chain:true, hygiene:true,
+              pom:true, gym:true, meals:true, prep:true, dump:true },
+    /* The first line of a life-dump walk, before the section and its items. */
+    dumpPrompt: 'Walk dump. One section only:',
+  },
+
+  /* GYM — the A/B program (spec §5)
+     Days rotate in order; the app suggests whichever comes after the last
+     full session. An exercise's `key` is its identity — every logged set is
+     filed under it, which is what makes "last time" and the progression hint
+     work — so the editor keeps it across a rename and a swapped machine is a
+     new name on the same key. `lo`–`hi` is the target range; `unit` is reps
+     or seconds; `bw` marks a bodyweight movement (no weight field). */
+  gym: {
+    warmup: '5 min bike or rower',
+    days: [
+      { key:'A', label:'day A', exercises:[
+        { key:'squat',    name:'leg press or goblet squat',   sets:3, lo:8,  hi:12, unit:'reps' },
+        { key:'chest',    name:'chest press or bench',        sets:3, lo:8,  hi:12, unit:'reps' },
+        { key:'pulldown', name:'lat pulldown',                sets:3, lo:8,  hi:12, unit:'reps' },
+        { key:'rdl',      name:'dumbbell romanian deadlift',  sets:3, lo:10, hi:10, unit:'reps' },
+        { key:'plank',    name:'plank',                       sets:3, lo:30, hi:45, unit:'s', bw:true },
+      ] },
+      { key:'B', label:'day B', exercises:[
+        { key:'lunge',    name:'lunges or hip thrust',        sets:3, lo:8,  hi:12, unit:'reps' },
+        { key:'press',    name:'shoulder press',              sets:3, lo:8,  hi:12, unit:'reps' },
+        { key:'row',      name:'seated row',                  sets:3, lo:8,  hi:12, unit:'reps' },
+        { key:'curl',     name:'leg curl',                    sets:3, lo:10, hi:12, unit:'reps' },
+        { key:'core',     name:'hanging knee raise or cable crunch', sets:3, lo:10, hi:15, unit:'reps', bw:true },
+      ] },
+    ],
+    /* The minimum session: logs as a gym day like any other. */
+    minimum: 'bike 10 min + 1 exercise',
+    /* Seconds between sets; the session offers these four as chips. */
+    rest: 90,
+    restChoices: [60, 90, 120, 180],
+    /* What "add weight" suggests adding. */
+    increment: 2.5,
+    unit: 'kg',
+    /* Sessions a week, shown as "X of 3–4" — a range, never a streak. */
+    target: { lo:3, hi:4 },
+    /* On a day with no session, a Kamo walk still counts as movement. */
+    walkCounts: true,
+    /* Tick this DO routine item when a session is finished. Blank: none. */
+    doLink: 'fit|exercise',
+  },
+
   /* DO */
   do: {
     /* Each routine is an ordered list of items. The glyph prefixes are part of
@@ -124,7 +242,10 @@ const DEFAULTS = {
       mood:   { low: 'low',     high: 'great' },
       stress: { low: 'calm',    high: 'overwhelmed' },
     },
-    workouts: ['push','pull','legs','rest'],
+    /* The A/B program's days (GYM), plus the minimum session and rest. GYM's
+       finished session is offered as the morning form's answer, and a button
+       is lit by matching its text — so the names here are GYM's day keys. */
+    workouts: ['A','B','min','rest'],
     /* Daily walking target, km — the line on the weekly chart under History. */
     kmTarget: 6,
     /* Turn a field off and it vanishes from the form and from the day's UI.
@@ -323,7 +444,7 @@ const DEFAULTS = {
 
      The pomodoro's four numbers are content rather than preferences on
      purpose: 50/10 is a different working day, not a different-looking one,
-     and the line ROOT.md draws is that appearance is how a thing looks and
+     and the line QUROS.md draws is that appearance is how a thing looks and
      content is what it is about. They travel with the content export for the
      same reason. */
   tools: {
@@ -337,6 +458,18 @@ const DEFAULTS = {
          most people want from a pomodoro is that it waits for them. */
       autoStart: false,
     },
+    /* What a focus round is *for*. Each finished round is filed under the area
+       picked when it started, which is what "2 CAP, 1 music today" and the
+       week's split are counted from. A key is an identity (the log is filed
+       under it); the label and colour are free. Its own branch rather than a
+       field of `pomodoro`: an install that overrode the lengths holds that
+       branch whole, and a new field in it would read as missing. */
+    areas: [
+      { key:'cap',   label:'CAP',   color:'#f0709a' },
+      { key:'music', label:'music', color:'#a78bfa' },
+      { key:'admin', label:'admin', color:'#e0a060' },
+      { key:'other', label:'other', color:'#8a8a8a' },
+    ],
     /* The Wim Hof round. The numbers are the method's own: about thirty breaths,
        a retention that is not timed because its length is the measurement, and
        a recovery hold of fifteen seconds on a full inhale.
@@ -354,7 +487,7 @@ const DEFAULTS = {
       /* 4.12 renamed the instrument to "breathing" — the method is Wim Hof's
          but the tool is a breathing round, and that is what the strip and the
          written-down session should say. The *key* stays `wimhof`: it is a
-         storage path and ROOT.md §5 does not rename those for a word. */
+         storage path and QUROS.md §5 does not rename those for a word. */
       label: 'breathing',
     },
     /* OPTIMISE
@@ -422,6 +555,115 @@ const DEFAULTS = {
     },
     /* Counter step buttons, largest first. */
     quickAmounts: [10, 5, 1, 0.5, 0.1],
+
+    /* The recipe library (spec §7)
+       A few preset meals so dinner is not a decision. Each ingredient is
+       `{ q, u, n }` — quantity, unit, name — for the 1× recipe, plus:
+         opt     optional; left off the grocery list unless asked for
+         pantry  usually in the cupboard; skipped unless asked for
+         choice  one of a group — the burritos take one meat a batch
+         note    said beside it, never sent to the list
+       A unit-less quantity is a count, and a count over one goes into the
+       grocery title (`onion x2`); anything with a unit goes in the task's
+       description instead, where it is a note rather than a different item.
+       `sides` offers another recipe alongside (the rice); `usual` is the
+       scale it is normally cooked at. A step's `m` is a timer, in minutes. */
+    recipes: [
+      { key:'stirfry_oyster', name:'stir-fry · oyster–soy & broccoli', serves:2,
+        note:'Steps still to write.',
+        ing:[ { n:'chicken thighs' }, { n:'broccoli' }, { n:'garlic' }, { n:'ginger' }, { n:'spring onion' },
+              { n:'oyster sauce' }, { n:'soy sauce' }, { n:'shaoxing wine' }, { n:'brown sugar' },
+              { n:'cornflour' }, { n:'bicarb soda' }, { n:'chili flakes' }, { n:'rice' } ],
+        steps:[] },
+      { key:'stirfry_hoisin', name:'stir-fry · hoisin–honey', serves:2,
+        note:'Steps still to write.',
+        ing:[ { n:'rump steak' }, { n:'garlic' }, { n:'ginger' }, { n:'spring onion' },
+              { n:'hoisin sauce' }, { n:'oyster sauce' }, { n:'soy sauce' }, { n:'honey' },
+              { n:'peanut oil' }, { n:'chicken stock' }, { n:'cornflour' }, { n:'baking soda' } ],
+        steps:[] },
+      { key:'burritos', name:'burritos', serves:4,
+        ing:[ { n:'tortillas' }, { n:'chicken', choice:'meat' }, { n:'minced beef', choice:'meat' }, { n:'pork', choice:'meat' },
+              { n:'black beans' }, { n:'peppers' }, { n:'onions' }, { n:'garlic' }, { n:'tomatoes' }, { n:'sweetcorn' },
+              { n:'courgette' }, { n:'lettuce' }, { n:'avocado' },
+              { n:'cheddar' }, { n:'mozzarella' }, { n:'sour cream' }, { n:'salsa' }, { n:'fresh coriander' },
+              { n:'lime', opt:true, note:'optional — Floor doesn’t like lime; add at the end' },
+              { n:'cumin' }, { n:'paprika' }, { n:'cayenne' }, { n:'chili flakes' }, { n:'oregano' }, { n:'garlic powder' } ],
+        sides:[ { label:'rice', options:['rice_red', 'rice_lime'] } ],
+        steps:[] },
+      { key:'rice_red', name:'mexican red rice', serves:4, note:'The default with burritos — no lime.',
+        ing:[ { q:300, u:'g', n:'rice' }, { q:1, u:'tbsp', n:'oil' }, { q:0.5, n:'onion' }, { q:1, u:'clove', n:'garlic' },
+              { q:2, u:'tbsp', n:'tomato paste' }, { q:1, u:'tsp', n:'cumin' }, { q:0.5, u:'tsp', n:'paprika' },
+              { q:0.5, u:'tsp', n:'salt', pantry:true }, { q:550, u:'ml', n:'chicken stock' } ],
+        steps:[ { t:'Rinse the rice.' },
+                { t:'Toast it in the oil.', m:2 },
+                { t:'Add the onion, diced, and the garlic.', m:1 },
+                { t:'Stir in the tomato paste, cumin, paprika and salt.' },
+                { t:'Add the stock and bring it to a boil.' },
+                { t:'Lid on, lowest heat. Don’t lift the lid.', m:15 },
+                { t:'Heat off, rest, then fluff.', m:10 } ] },
+      { key:'rice_lime', name:'cilantro-lime rice', serves:4,
+        ing:[ { q:300, u:'g', n:'rice' }, { q:1, u:'tbsp', n:'oil' }, { q:1, u:'clove', n:'garlic' },
+              { q:550, u:'ml', n:'chicken stock' }, { q:0.5, u:'tsp', n:'salt', pantry:true },
+              { q:15, u:'g', n:'fresh coriander' },
+              { q:1, n:'lime', opt:true, note:'optional, per Floor' } ],
+        steps:[ { t:'Rinse the rice.' },
+                { t:'Toast it in the oil with the garlic, minced.', m:2 },
+                { t:'Add the stock and salt, bring it to a boil.' },
+                { t:'Lowest heat, covered.', m:15 },
+                { t:'Rest.', m:10 },
+                { t:'Stir in the lime zest and juice (optional) and the chopped coriander.' } ] },
+      { key:'soupe', name:'soupe de légumes du soleil', serves:4, usual:2,
+        note:'Usually doubled for leftovers. Keeps 4 days in the fridge, freezes well.',
+        ing:[ { q:2, u:'tbsp', n:'olive oil' }, { q:1, n:'onion' }, { q:1, n:'carrot' }, { q:2, u:'cloves', n:'garlic' },
+              { q:1, n:'red pepper' }, { q:1, n:'courgette' },
+              { q:1, n:'aubergine', opt:true, note:'optional — or another courgette' },
+              { q:400, u:'g', n:'chopped tomatoes' }, { q:750, u:'ml', n:'stock' },
+              { q:1, u:'tsp', n:'herbes de provence', pantry:true },
+              { q:1, u:'tsp', n:'salt', pantry:true }, { q:0.25, u:'tsp', n:'black pepper', pantry:true } ],
+        steps:[ { t:'Dice everything 1–2 cm; the carrot smaller.' },
+                { t:'Oil, then the onion and carrot.', m:5 },
+                { t:'The garlic.', m:1 },
+                { t:'The pepper, courgette and aubergine.', m:5 },
+                { t:'Tomatoes, stock, herbs, salt and pepper. Boil, then simmer partly covered.', m:20 },
+                { t:'Blend fully, half, or not at all. Season. A drizzle of olive oil.' } ] },
+      { key:'grilled_cheese', name:'grilled cheese', serves:1,
+        ing:[ { q:2, u:'slices', n:'pain de mie' }, { n:'butter' }, { n:'cheddar' }, { n:'mozzarella' },
+              { n:'italian herbs', pantry:true },
+              { n:'provolone dolce', opt:true, choice:'third cheese' }, { n:'fontina', opt:true, choice:'third cheese' },
+              { n:'young comté', opt:true, choice:'third cheese' }, { n:'emmental', opt:true, choice:'third cheese' },
+              { n:'young gouda', opt:true, choice:'third cheese' } ],
+        steps:[ { t:'Low-medium heat.' },
+                { t:'Lid on so the cheese melts before the bread burns.', m:1 } ] },
+    ],
+    /* Names that are the same thing on a shopping list. One group per line in
+       the editor; the first name is the one kept. Matched after quantities
+       and plurals are taken off. */
+    synonyms: [
+      ['baking soda', 'bicarb soda', 'bicarbonate of soda', 'bicarbonate'],
+      ['cornflour', 'cornstarch', 'corn starch'],
+      ['spring onion', 'green onion', 'scallion'],
+      ['coriander', 'fresh coriander', 'cilantro'],
+      ['courgette', 'zucchini', 'zuchini'],
+      ['aubergine', 'eggplant'],
+      ['minced beef', 'ground beef', 'beef mince'],
+      ['chili flakes', 'chilli flakes', 'red pepper flakes'],
+      ['tomato paste', 'tomato concentrate'],
+      ['bell pepper', 'peppers', 'sweet pepper', 'red pepper'],
+      ['mozzarella', 'mozarella'],
+      ['oregano', 'origan'],
+      ['chopped tomatoes', 'canned tomatoes', 'tinned tomatoes'],
+      ['stock', 'chicken stock', 'stock cube'],
+    ],
+    /* Always in the cupboard: left off a meal's groceries unless asked for. */
+    pantry: ['herbes de provence', 'salt', 'black pepper'],
+    /* Grocery trips — parent tasks in the STORE section, each with a due date
+       and the items under it. A walk shop is the small one on foot, only
+       what is needed now; a car shop is the big one. The label is what the
+       parent task is called, before " — <when>". */
+    trips: [
+      { key:'walk', label:'walk shop' },
+      { key:'car',  label:'car shop' },
+    ],
   },
 
   /* TEND */

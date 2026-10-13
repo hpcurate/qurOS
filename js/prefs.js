@@ -1,11 +1,20 @@
 /* Prefs applies appearance to <html> before stylesheets load.
    Enums use data attributes; continuous settings use inline custom properties
-   so user dials override presets. Storage: root_prefs_v1, with legacy root_theme
-   migration. Modules read behaviour settings live through Prefs.get(). */
+   so user dials override presets. Storage: quros_prefs_v1, seeded once from
+   root's root_prefs_v1, with legacy root_theme migration. Modules read
+   behaviour settings live through Prefs.get(). */
 window.Prefs = (function () {
 'use strict';
 
-const KEY        = 'root_prefs_v1';
+/* qurOS keeps its own prefs record. Every *data* key is shared with root on
+   purpose — both are served from the same origin, so the logged days, the
+   lists and the plants are one set of records read by two apps — but the shell
+   around them is not: qurOS has two apps root does not, and root rewrites
+   `apps` and `appsSeen` from its own list whenever it saves. One record for
+   both would be two apps taking turns undoing each other's tab bar. The first
+   boot copies root's look across (SEED_KEY) so nothing has to be set twice. */
+const KEY        = 'quros_prefs_v1';
+const SEED_KEY   = 'root_prefs_v1';
 const LEGACY_KEY = 'root_theme';
 const root       = document.documentElement;
 
@@ -133,7 +142,13 @@ const THEME_CHARACTER = {
    user's own subset and order; the shell builds its slide track and tab bar
    from it, so an app switched off here has no tab and no slide. Settings is
    always last and is not in this list. */
-const APPS = ['do', 'log', 'plan', 'store', 'tend', 'track', 'learn', 'cal', 'create', 'tools'];
+const APPS = ['today', 'do', 'log', 'gym', 'plan', 'store', 'tend', 'track', 'learn', 'cal', 'create', 'tools'];
+/* What a brand-new install puts in the bar. PLAN and DAY are the rigid
+   plan-the-hours pair the flex system replaces (qurOS spec §1): they still
+   ship and still work, and the settings home opens them, but a fresh install
+   does not start with a schedule it was built to get away from. Both are in
+   `appsSeen` from the start, so they stay off rather than arriving as "new". */
+const DEFAULT_APPS = APPS.filter(a => a !== 'plan' && a !== 'cal');
 /* Every tab in the bar, which is the apps plus settings — settings has no data
    of its own but it has a tab, and a tab has a colour. Its custom property is
    --tab-set, not --tab-settings: the button's data-app is the long name and the
@@ -256,7 +271,7 @@ const SCHEMA = {
   tips:         { kind:'bool',   def:true,  attr:'data-tips' },
 
   // navigation — which apps have a tab, and in what order
-  apps:         { kind:'list',   def:APPS.slice() },
+  apps:         { kind:'list',   def:DEFAULT_APPS.slice() },
   /* Every app this install has ever been offered. Not a setting — there is no
      control for it — but it lives here so it is stored, exported and restored
      with the rest. See the note on load(): it is what tells a brand-new app
@@ -313,7 +328,7 @@ const SCHEMA = {
   /* Let the Todoist push carry **today's** LOG day as well. Off by default and
      deliberately today-only: the private route exists because a journal does
      not belong on someone else's server, and the one honest exception is the
-     day you are still in the middle of. See ROOT.md §10. */
+     day you are still in the middle of. See QUROS.md §10. */
   syncTodayPrivate: { kind:'bool', def:false },
   /* How often a sync runs on its own, in minutes. `0` is off, and off is the
      default: §10's "both are manual" was a rule about not being stood next to
@@ -414,6 +429,18 @@ const SCHEMA = {
   toolsBtnRound:{ kind:'range',  def:16, min:0,  max:50,  step:1, unit:'%',  cssVar:'--tl-btn-round' },
   doHideDone:   { kind:'bool',   def:false },
   doCardStyle:  { kind:'enum',   def:'full', values:['full','minimal'] },
+
+  /* TODAY. The home screen leads with the one next action; the whole chain
+     under it is folded by default, because the list is the mountain and the
+     next step is the thing to look at (spec §2.4). The three switches say
+     which of the secondary sections are drawn at all. */
+  todayChain:   { kind:'enum',   def:'fold', values:['fold','open'] },
+  todayWeek:    { kind:'bool',   def:true },
+  todayFocus:   { kind:'bool',   def:true },
+  todayDumpRow: { kind:'bool',   def:true },
+  /* GYM: a logged set starts the rest timer. Off, the timer is started by
+     hand from the session's own header. */
+  gymAutoRest:  { kind:'bool',   def:true },
 };
 
 /* State */
@@ -454,8 +481,13 @@ const APPS_BEFORE_SEEN = ['do', 'log', 'plan', 'store', 'tend', 'track', 'learn'
    and stays off. The result is persisted immediately — without that, switching
    the new app straight back off would be undone on the next boot. */
 function adoptNewApps(stored) {
-  if (!Array.isArray(prefs.apps) || !prefs.apps.length) prefs.apps = APPS.slice();
-  const seen  = Array.isArray(stored.appsSeen) ? stored.appsSeen : APPS_BEFORE_SEEN;
+  if (!Array.isArray(prefs.apps) || !prefs.apps.length) prefs.apps = DEFAULT_APPS.slice();
+  /* Nothing stored at all is a first boot, and on a first boot nothing is
+     "new" — the shipped list is simply the list. Without this the pre-appsSeen
+     fallback below would read a brand-new install as an old one and hand it
+     every app that list does not name, PLAN and DAY included. */
+  const fresh0 = !Object.keys(stored).length;
+  const seen  = fresh0 ? APPS : Array.isArray(stored.appsSeen) ? stored.appsSeen : APPS_BEFORE_SEEN;
   const fresh = APPS.filter(a => !seen.includes(a));
   prefs.appsSeen = APPS.slice();
   if (!fresh.length) return fresh;
@@ -467,7 +499,16 @@ function adoptNewApps(stored) {
 
 function load() {
   let stored = {};
-  try { stored = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch {}
+  try { stored = JSON.parse(localStorage.getItem(KEY) || 'null') || null; } catch { stored = null; }
+  /* First boot of qurOS on an origin root has already been used on: start from
+     root's look rather than from the shipped one. Read once — from here on the
+     two records are independent. `startTab` is left behind: it names a tab
+     in root's bar, and qurOS opens on TODAY until told otherwise. */
+  const firstBoot = !stored;
+  if (firstBoot) {
+    try { stored = JSON.parse(localStorage.getItem(SEED_KEY) || '{}') || {}; } catch { stored = {}; }
+    delete stored.startTab;
+  }
   prefs = Object.assign(defaultsOf(), stored);
   // first run on an install that only ever knew the old four themes
   if (!stored.theme) {
@@ -478,6 +519,9 @@ function load() {
   }
   adoptNewApps(stored);
   dropUiScale(stored);
+  /* Written at once, so the seed is taken exactly one time: a root used later
+     on the same origin must not be copied over a qurOS that has since moved on. */
+  if (firstBoot) persist();
 }
 
 /* Drop retired document scale. Repair the old scale-to-density migration by

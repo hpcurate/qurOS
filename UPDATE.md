@@ -1,7 +1,7 @@
 # Update protocol
 
 Aim for a complete, verified change with little repeated reading or output.
-Run commands from `root/`. Node and the existing `test/` dependencies are enough.
+Run commands from `qurOS/`. Node and the existing `test/` dependencies are enough.
 If dependencies are missing, run `npm install --prefix test` once.
 
 ## Start
@@ -15,7 +15,7 @@ Replace `tools` with an app ID, `shell`, `prefs`, `config`, `settings`, `search`
 
 - Copies the entire project, including hidden files, Git history, dependencies
   and uncommitted work, into a timestamped folder in the workspace's shared
-  `_backups/` (beside `root/`, not inside it); verifies file hashes.
+  `_backups/` (beside `qurOS/`, not inside it); verifies file hashes.
 - Saves the backup path in ignored `.update/session.json` and prints a file map
   and Git status. Backups are retained; the runner never deletes them.
 
@@ -31,7 +31,7 @@ Keep it in the conversation; a separate planning document is rarely needed.
 
 Start with the relevant `js/<app>.js` function, `css/<app>.css` selectors and
 markup in `index.html`. Search Config, Prefs and Settings only when they own a
-related value or editor. Read ROOT.md by section: architecture §3, tokens §4,
+related value or editor. Read QUROS.md by section: architecture §3, tokens §4,
 storage §5, constraints §6, recipes §7, PLAN export §8, DAY §9. Search old
 release notes only when a regression needs that history.
 
@@ -73,7 +73,7 @@ live Todoist behavior needs separate verification when changed.
 
 ## Finish
 
-Review the final diff for accidental changes. Add one brief ROOT.md changelog
+Review the final diff for accidental changes. Add one brief QUROS.md changelog
 entry: result, reason when useful, validation. Report what changed, what passed,
 the backup path and any remaining limitation. Stop once the required checks
 pass; do not spend tokens restating the plan or dumping successful test lines.

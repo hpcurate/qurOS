@@ -23,7 +23,7 @@
   display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:2px}
 /* DAY reads lower case throughout: these opt out of the caps switch by name —
    the one deliberate exception to the "always var(--caps)" rule, written down
-   in ROOT.md §9 so it reads as a choice rather than a miss. */
+   in QUROS.md §9 so it reads as a choice rather than a miss. */
 .ns-cal .cbd-date{font:700 11.5px/1 var(--mono);letter-spacing:.06em;color:var(--tx);
   text-transform:none;white-space:nowrap}
 .ns-cal .cbd-rel{font:400 8px/1 var(--mono);letter-spacing:1.4px;color:var(--y);

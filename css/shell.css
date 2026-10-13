@@ -118,6 +118,7 @@ body{
 /* the two apps with a corner action keep their label clear of it */
 .ns-do > .h-top > .h-label{padding-right:calc(118px * var(--dens))}
 .ns-store > .h-top > .h-label{padding-right:calc(80px * var(--dens))}
+.ns-today > .h-top > .h-label{padding-right:calc(104px * var(--dens))}
 /* Every app's wordmark row is the same height, so every band is — see
    `--band-row`. Without it DO's 40px tab strip made its band 2px taller than
    the other nine the moment the wordmark stopped being 54px tall. */
@@ -233,6 +234,11 @@ body{
 .tab-b svg,.tab-b .tb-l{position:relative;z-index:1}
 .tab-b svg{width:var(--nav-icon);height:var(--nav-icon);flex-shrink:0}
 .tab-b .tb-l{font:700 7px/1 var(--head);letter-spacing:.12em;text-transform:var(--caps)}
+/* a crowded bar (shell.js paintNav): icons only, and the live tab — which still
+   wears its label — takes the width a label needs */
+#nav[data-crowd="on"] .tab-b:not(.on) .tb-l{display:none}
+#nav[data-crowd="on"] .tab-b.on{flex:1.9}
+#nav[data-crowd="on"] .tab-b{transition:color .18s ease, flex-grow var(--dur-2) var(--ease)}
 /* the filled pill IS the active indicator, and it grows into place */
 .tab-b::before{
   content:'';position:absolute;inset:0;z-index:0;
@@ -500,6 +506,9 @@ input.pad-on{border-color:var(--y)!important;background:var(--yd)}
   [data-desktop="rail"] .tab-b{flex:0 0 auto;padding:13px 6px;gap:6px;border-radius:var(--r3)}
   [data-desktop="rail"] .tab-b svg{width:calc(var(--nav-icon) * 1.05);height:calc(var(--nav-icon) * 1.05)}
   [data-desktop="rail"] .tab-b .tb-l{font-size:8px}
+  /* a rail has a row per tab, so it is never crowded */
+  [data-desktop="rail"]:not([data-tab-labels="off"]) #nav[data-crowd="on"] .tab-b:not(.on) .tb-l{display:block}
+  [data-desktop="rail"] #nav[data-crowd="on"] .tab-b.on{flex:0 0 auto}
   /* the rail's tabs are wide boxes, so the default pill squares off here — a
      shape the user picked outright keeps whatever it picked (themes.css) */
   [data-desktop="rail"][data-nav-shape="pill"] .tab-b{--tab-r:var(--r3)}

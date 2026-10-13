@@ -69,21 +69,21 @@ window.SYNC = (function () {
   const ROUTES = {
     todoist: {
       label: 'todoist',
-      apps:  'DO, DAY, CREATE and TEND',
+      apps:  'DO, DAY, CREATE, TEND and GYM',
       dayKey: iso => 'do_' + iso,
       todayOnly: true,
       slices: ['cal'],
       state: ['do-stats-v1', 'do_todoist_v1', 'travel_state_v2',
-              'create_v1', 'tend.v3', 'tend_todoist_v1'],
+              'create_v1', 'tend.v3', 'tend_todoist_v1', 'gym_v1'],
     },
     file: {
       label: 'file',
-      apps:  'LOG, TRACK and STORE',
+      apps:  'LOG, TRACK, STORE and TODAY',
       dayKey: iso => 'log_' + iso,
       todayOnly: false,
       slices: [],
       state: ['capTracker.v2', 'capTracker.weeks.v1', 'store_state_v1',
-              'log-scale-v2', 'log-alert-seen-v1'],
+              'log-scale-v2', 'log-alert-seen-v1', 'today_v1'],
     },
   };
 
@@ -158,11 +158,12 @@ window.SYNC = (function () {
      label colours, the sync stamps — which is the one group that is off by
      default, because it is the only one where the other device's answer is not
      better than yours. */
-  const SYSTEM_KEYS = ['root_tab', 'root_theme', 'root_labels_v1', 'root_todoist_v1', STAMP, TOUCH, BACKUP];
+  const SYSTEM_KEYS = ['root_tab', 'quros_tab', 'root_theme', 'root_labels_v1', 'root_todoist_v1', STAMP, TOUCH, BACKUP];
 
   function groupOf(key) {
     const k = String(key);
-    if (k === 'root_prefs_v1') return 'style';
+    /* qurOS's look and root's: both are the appearance engine's record */
+    if (k === 'quros_prefs_v1' || k === 'root_prefs_v1') return 'style';
     if (k === 'root_config_v1') return 'settings';
     if (SYSTEM_KEYS.includes(k)) return 'system';
     return 'apps';
@@ -172,7 +173,9 @@ window.SYNC = (function () {
      shopping list are yours. These are the keys the Todoist route leaves
      behind while safe transfer is on — the switch is the old route split made
      into a dial rather than a new idea. */
-  const SENSITIVE = [/^log_/, /^log-/, /^capTracker\./, /^store_state_/];
+  /* TODAY's goals and its life-dump map are as private as the journal they sit
+     beside — the same split, one more prefix. */
+  const SENSITIVE = [/^log_/, /^log-/, /^capTracker\./, /^store_state_/, /^today_/];
   const sensitive = key => SENSITIVE.some(re => re.test(String(key)));
 
   /* A key that is nothing but a Todoist key travels on no route, by no switch.
@@ -566,6 +569,75 @@ window.SYNC = (function () {
       : { out: local, notes: [] };
   }
 
+  /* GYM's record: a session is an event, exactly like CREATE's — it happened
+     on one device, and taking the newer whole record would delete whatever the
+     other side logged. Sessions union by id; the same session on both sides
+     (an edit after a sync) keeps the copy that finished later. The live session
+     and the rest timer are this device's, unless it has none and the other
+     does — a session started on the phone stays the phone's. */
+  function mergeGym(local, incoming) {
+    if (!incoming || typeof incoming !== 'object') return { out: local, notes: [] };
+    if (!local || typeof local !== 'object') return { out: clone(incoming), notes: ['gym_v1 · added'] };
+    const mine = Array.isArray(local.sessions) ? local.sessions : [];
+    const theirs = Array.isArray(incoming.sessions) ? incoming.sessions : [];
+    const byId = new Map(mine.map(s => [s && s.id, s]));
+    let added = 0;
+    theirs.forEach(s => {
+      if (!s || !s.id) return;
+      const have = byId.get(s.id);
+      if (!have) { byId.set(s.id, clone(s)); added++; }
+      else if ((+s.endedAt || 0) > (+have.endedAt || 0)) byId.set(s.id, clone(s));
+    });
+    const sessions = Array.from(byId.values()).filter(Boolean)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || (+a.startedAt || 0) - (+b.startedAt || 0));
+    const out = Object.assign({}, local, { sessions, live: local.live || incoming.live || null });
+    return { out, notes: added ? [`GYM · ${added} session${added === 1 ? '' : 's'} added`] : [] };
+  }
+
+  /* TODAY's record, a day at a time. A day is filled in on whichever device
+     was in hand, so the two halves are put together rather than one chosen:
+     goals union by id (a goal done on either side is done), ticks and stamps
+     union by key (the other side's answer only fills what this one left
+     empty), the bad-day flag is on if either side set it. The weeks union the
+     same way; the life-dump marks keep the further along of the two. */
+  function mergeToday(local, incoming) {
+    if (!incoming || typeof incoming !== 'object') return { out: local, notes: [] };
+    if (!local || typeof local !== 'object') return { out: clone(incoming), notes: ['today_v1 · added'] };
+    const out = clone(local);
+    const goals = (a, b) => {
+      const m = new Map((Array.isArray(a) ? a : []).map(g => [g && g.id, g]));
+      (Array.isArray(b) ? b : []).forEach(g => {
+        if (!g || !g.id) return;
+        const h = m.get(g.id);
+        if (!h) m.set(g.id, clone(g));
+        else m.set(g.id, Object.assign({}, h, { done: !!(h.done || g.done), at: h.at || g.at, fate: h.fate || g.fate }));
+      });
+      return Array.from(m.values()).filter(Boolean);
+    };
+    const fill = (a, b) => Object.assign({}, b || {}, a || {});
+    let days = 0;
+    out.days = out.days && typeof out.days === 'object' ? out.days : {};
+    Object.keys(incoming.days || {}).forEach(iso => {
+      const t = incoming.days[iso], h = out.days[iso];
+      if (!h) { out.days[iso] = clone(t); days++; return; }
+      const merged = Object.assign({}, h, {
+        goals: goals(h.goals, t.goals), chain: fill(h.chain, t.chain), hyg: fill(h.hyg, t.hyg), prep: fill(h.prep, t.prep),
+        bad: !!(h.bad || t.bad), wake: h.wake || t.wake || '', sleep: h.sleep || t.sleep || '', exported: h.exported || t.exported || '' });
+      if (!same(merged, h)) { out.days[iso] = merged; days++; }
+    });
+    out.weeks = out.weeks && typeof out.weeks === 'object' ? out.weeks : {};
+    Object.keys(incoming.weeks || {}).forEach(k => {
+      out.weeks[k] = { goals: goals(out.weeks[k] && out.weeks[k].goals, incoming.weeks[k] && incoming.weeks[k].goals) };
+    });
+    if (!out.map && incoming.map) out.map = clone(incoming.map);
+    const rank = { partial: 1, done: 2 };
+    out.mapState = Object.assign({}, out.mapState || {});
+    Object.keys(incoming.mapState || {}).forEach(k => {
+      if ((rank[incoming.mapState[k]] || 0) > (rank[out.mapState[k]] || 0)) out.mapState[k] = incoming.mapState[k];
+    });
+    return { out, notes: days ? [`TODAY · ${days} day${days === 1 ? '' : 's'} put together`] : [] };
+  }
+
   /* CREATE's record, merged rather than chosen between.
 
      A session is an event: it happened, on one device, at a moment. Taking the
@@ -712,6 +784,8 @@ window.SYNC = (function () {
       const theirs = theirTouch[key], mine = touchedAt(key);
       const r = key === 'do-stats-v1' ? mergeStats(local, incoming)
               : key === 'create_v1'   ? mergeCreate(local, incoming, !!(theirs && mine && theirs > mine))
+              : key === 'gym_v1'      ? mergeGym(local, incoming)
+              : key === 'today_v1'    ? mergeToday(local, incoming)
               : mergeState(key, local, incoming, theirs, mine);
       notes.push(...r.notes);
       if (r.out !== undefined && !same(r.out, local)) {
@@ -1103,5 +1177,6 @@ ${JSON.stringify(body)}
            exportEverything, parseEverything, restoreEverything, everythingCount, everythingText,
            pushTodoist, pullTodoist, exportFile, parseFile, fileText,
            lastAt, window: window_, span, unwrap, wrap, deviceId,
-           _merge: { mergeLogDay, mergeDoDay, mergeCalDay, mergeState, mergeStats, mergeCreate, unionBy, scrub, tieWinner } };
+           _merge: { mergeLogDay, mergeDoDay, mergeCalDay, mergeState, mergeStats, mergeCreate, mergeGym, mergeToday,
+                     unionBy, scrub, tieWinner } };
 })();

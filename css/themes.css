@@ -213,31 +213,36 @@
    There is no block for the `custom` palette on purpose — it matches none of
    these, so a tab the custom record does not name keeps the hue below, and
    Prefs writes the ones it does name inline over the top. */
-:root{--tab-do:#A78BFA;--tab-log:#5cdb7d;--tab-plan:#5e8cff;--tab-store:#e8a33d;
+/* TODAY wears the brand violet (the qurOS accent, #A78BFA), so DO moved one
+   step along the wheel to indigo — two tabs in one hue read as one tab. GYM
+   is the lime nothing else in the bar is. */
+:root{--tab-today:#A78BFA;--tab-gym:#b5e853;--tab-do:#7C8CFF;--tab-log:#5cdb7d;--tab-plan:#5e8cff;--tab-store:#e8a33d;
       --tab-tend:#3fc9b0;--tab-track:#f0709a;--tab-learn:#5ad4e6;--tab-cal:#c98b3f;
       --tab-create:#e6c34a;--tab-tools:#ef7261;--tab-set:var(--mu);--tab-on-c:#0e0e0e}
 /* warm — one sunset, so the bar reads as a run across itself rather than nine
    unrelated hues */
-[data-tab-palette="warm"]{--tab-do:#ff9e57;--tab-log:#ffc861;--tab-plan:#ff7a5c;
+[data-tab-palette="warm"]{--tab-today:#ff8fa3;--tab-gym:#f2b134;--tab-do:#ff9e57;--tab-log:#ffc861;--tab-plan:#ff7a5c;
       --tab-store:#e8a33d;--tab-tend:#d9b26a;--tab-track:#ff6b81;--tab-learn:#ffb38a;
       --tab-cal:#e08a4c;--tab-create:#ffd76e;--tab-tools:#e0614a;--tab-on-c:#1a0d05}
 /* cool — the same idea at the other end, and the quietest of the five */
-[data-tab-palette="cool"]{--tab-do:#8ea8ff;--tab-log:#5fd0c4;--tab-plan:#5e8cff;
+[data-tab-palette="cool"]{--tab-today:#b4a7ff;--tab-gym:#7ee0c8;--tab-do:#8ea8ff;--tab-log:#5fd0c4;--tab-plan:#5e8cff;
       --tab-store:#7fb3e8;--tab-tend:#3fc9b0;--tab-track:#a78bfa;--tab-learn:#5ad4e6;
       --tab-cal:#6fa0d8;--tab-create:#9ad8e8;--tab-tools:#7fd0b0;--tab-on-c:#05121c}
 /* candy — the app palette washed out: coloured, but not loud */
-[data-tab-palette="candy"]{--tab-do:#cbb6ff;--tab-log:#a8e6b8;--tab-plan:#a9c6ff;
+[data-tab-palette="candy"]{--tab-today:#e2d6ff;--tab-gym:#d6f2a6;--tab-do:#cbb6ff;--tab-log:#a8e6b8;--tab-plan:#a9c6ff;
       --tab-store:#ffd9a3;--tab-tend:#a6e5da;--tab-track:#ffb3c9;--tab-learn:#b3e9f2;
       --tab-cal:#eccba3;--tab-create:#f6e6a8;--tab-tools:#ffc0b3;--tab-on-c:#171514}
 /* neon — full saturation. Too much on a light theme on purpose; it is here
    because a phone at night is the screen this app is mostly read on. */
-[data-tab-palette="neon"]{--tab-do:#b026ff;--tab-log:#39ff14;--tab-plan:#2979ff;
+[data-tab-palette="neon"]{--tab-today:#7c4dff;--tab-gym:#aeea00;--tab-do:#b026ff;--tab-log:#39ff14;--tab-plan:#2979ff;
       --tab-store:#ff9100;--tab-tend:#00e5c0;--tab-track:#ff2d95;--tab-learn:#00e5ff;
       --tab-cal:#ff6d00;--tab-create:#ffe600;--tab-tools:#ff1744;--tab-on-c:#05050a}
 /* mono — no hues at all, a ramp cut from the text colour. Colour-coding
    without colour: the tabs still differ, by weight rather than by hue, and it
    is the one palette that is as legible in a light theme as in a dark one. */
 [data-tab-palette="mono"]{
+      --tab-today:var(--tx);
+      --tab-gym:color-mix(in srgb,var(--tx) 85%,transparent);
       --tab-do:color-mix(in srgb,var(--tx) 96%,transparent);
       --tab-log:color-mix(in srgb,var(--tx) 89%,transparent);
       --tab-plan:color-mix(in srgb,var(--tx) 82%,transparent);
@@ -257,6 +262,8 @@
    colour it was given, so every preset palette still falls through to its own
    --tab-on-c. */
 [data-color-tabs="on"] #nav .tab-b[data-app="do"]{--tab-app-c:var(--tab-do);--tab-app-ink:var(--tab-do-ink,var(--tab-on-c))}
+[data-color-tabs="on"] #nav .tab-b[data-app="today"]{--tab-app-c:var(--tab-today);--tab-app-ink:var(--tab-today-ink,var(--tab-on-c))}
+[data-color-tabs="on"] #nav .tab-b[data-app="gym"]{--tab-app-c:var(--tab-gym);--tab-app-ink:var(--tab-gym-ink,var(--tab-on-c))}
 [data-color-tabs="on"] #nav .tab-b[data-app="log"]{--tab-app-c:var(--tab-log);--tab-app-ink:var(--tab-log-ink,var(--tab-on-c))}
 [data-color-tabs="on"] #nav .tab-b[data-app="plan"]{--tab-app-c:var(--tab-plan);--tab-app-ink:var(--tab-plan-ink,var(--tab-on-c))}
 [data-color-tabs="on"] #nav .tab-b[data-app="store"]{--tab-app-c:var(--tab-store);--tab-app-ink:var(--tab-store-ink,var(--tab-on-c))}

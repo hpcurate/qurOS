@@ -1,12 +1,16 @@
 {
-  "name": "root-test",
+  "name": "quros-test",
   "private": true,
-  "description": "jsdom harness for ROOT — not part of the site. cd test && npm install && node harness.mjs",
+  "description": "jsdom harness for qurOS — not part of the site. cd test && npm install && npm test",
   "type": "module",
   "scripts": {
-    "test": "node harness.mjs",
+    "test": "node harness.mjs && node flex.mjs",
     "update": "node update.mjs",
-    "test:update": "node --test update.test.mjs"
+    "test:update": "node --test update.test.mjs",
+    "flex": "node flex.mjs",
+    "boot": "node boot.mjs"
   },
-  "devDependencies": { "jsdom": "^24.1.0" }
+  "devDependencies": {
+    "jsdom": "^24.1.0"
+  }
 }

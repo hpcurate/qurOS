@@ -56,7 +56,7 @@ function readConfig() {
     stages:[{ key:'idea', label:'idea', color:'#7a8699', items:[], terminal:true }] }];
   HOME = Object.assign({ sort:'touched', sessionCount:6, weekDays:7 }, Config.get('create.home') || {});
   /* **Merged through the shipped defaults, not read raw.** An override is
-     stored whole-branch (ROOT.md §3), so an install that overrode this branch
+     stored whole-branch (QUROS.md §3), so an install that overrode this branch
      while it was `{ label, maxAgeMin }` — which is the shape 4.1.0 shipped for
      one version — shadows the whole thing, and `project` reads as undefined:
      no chip on the strip, a blank field in Settings, and, if the shelf was left
@@ -251,7 +251,7 @@ function ago(iso) {
          n < 60 ? Math.round(n / 7) + ' weeks ago' : fmtDay(iso);
 }
 /* 1.5 reads as 1h30. A session is written in hours because the numpad's
-   duration kind hands back hours — see ROOT.md §6 on `data-pad`. */
+   duration kind hands back hours — see QUROS.md §6 on `data-pad`. */
 function hrs(h) {
   const n = Math.max(0, +h || 0);
   const whole = Math.floor(n), m = Math.round((n - whole) * 60);
@@ -382,7 +382,7 @@ function sortWorks(rows) {
 /* The tab strip
    DO's DAILY / MEDIA / OTHER selector, in CREATE: one bordered rail, flat
    chips inside it, and a glider that slides under the selected one. The shape
-   lives in create.css and is a deliberate copy of `.ns-do .tabs` — ROOT.md §6
+   lives in create.css and is a deliberate copy of `.ns-do .tabs` — QUROS.md §6
    names the pair, because two copies of one shape is two things to keep in
    step.
 
@@ -794,7 +794,7 @@ async function fetchCurate() {
     if (!proj) throw new Error('no project called “' + CURATE.project + '” — settings → create');
     const pid = String(proj.id);
     /* The label colours come from the cache every app shares
-       (`root_labels_v1`, ROOT.md §3) and are asked for beside the tasks rather
+       (`root_labels_v1`, QUROS.md §3) and are asked for beside the tasks rather
        than after them, so a first draw already has them. `Todoist.labels()`
        answers from cache when it is fresh and never rejects — a colour that is
        not known yet costs the row nothing, it is drawn plain. */

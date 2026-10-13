@@ -1,7 +1,7 @@
 {
-  "name": "ROOT",
-  "short_name": "ROOT",
-  "description": "DO · LOG · PLAN · STORE · TEND · TRACK · LEARN — seven small tools, one phone.",
+  "name": "qurOS",
+  "short_name": "qurOS",
+  "description": "TODAY · DO · LOG · GYM · STORE · TOOLS and the rest — a day that bends instead of breaking, on one phone.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

@@ -1177,7 +1177,7 @@ function setTemplate(name) {
 }
 
 /* What the day already holds
-   PLAN cannot see Google and never will (ROOT.md §8), but it can see the record
+   PLAN cannot see Google and never will (QUROS.md §8), but it can see the record
    CAL keeps of what it last exported — the same day, written down at the moment
    the task was sent. That is enough to answer the two questions the export
    panel could not:

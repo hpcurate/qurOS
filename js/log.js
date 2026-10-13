@@ -1264,6 +1264,31 @@ function popM() {
   $id('m-tmin').value = m.tmin || '';
   const lw = lastWeight();
   $id('last-weight').textContent = lw ? `last: ${lw} kg` : '';
+  offerDefaults(m);
+}
+
+/* What the rest of the app already knows about this morning, offered as the
+   form's defaults and never written for it: TODAY's one-tap wake-up stamp,
+   the hours between last night's lights-out and that stamp, and the session
+   GYM finished. The record is still only what Save writes — an offered value
+   is a value in a field, which is why it lands only in an empty one. The
+   module is `window.TODAY`, spelled out: inside this file `TODAY` is the
+   selected day. */
+function offerDefaults(m) {
+  const flex = window.TODAY, gym = window.GYM;
+  const put = (id, v) => { const el = $id(id); if (el && !el.value && v != null && v !== '') el.value = v; };
+  try {
+    if (!m.wt && flex && flex.wakeOf) put('m-wt', flex.wakeOf(TODAY));
+    if (!m.sl && flex && flex.sleepHoursBefore) put('m-sl', flex.sleepHoursBefore(TODAY));
+  } catch {}
+  try {
+    const g = !m.wo && gym && gym.dayOf ? gym.dayOf(TODAY) : null;
+    if (g) {
+      woSet(g.label);
+      if (!m.tkg && g.volume) put('m-tkg', String(g.volume));
+      if (!m.tmin && g.mins) put('m-tmin', String(g.mins));
+    }
+  } catch {}
 }
 
 /* Decimal fields are free text (see the note in index.html); the shell already
@@ -1332,6 +1357,39 @@ function renderEntries() {
     </div>`).reverse().join('');
 }
 
+/* One entry another app keeps for a day — TODAY's evening dump is the one
+   user, filed under `src:'dump'`. Written to the stored record, never through
+   the live one: the live record may be holding a form's unsaved answers, and
+   flushing it here would save them for the user (§6, "discard has to undo").
+   The live record's entries are brought into step afterwards so the screen
+   shows the change. An empty text removes the entry. */
+function setEntry(iso, src, text) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso)) || !src) return;
+  const rec = readDay(iso) || Object.assign(fresh(), { date: iso });
+  if (!Array.isArray(rec.entries)) rec.entries = [];
+  const i = rec.entries.findIndex(e => e && e.src === src);
+  const t = String(text == null ? '' : text).trim();
+  if (!t) { if (i < 0) return; rec.entries.splice(i, 1); }
+  else if (i < 0) {
+    const now = new Date();
+    rec.entries.push({ time: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`, text: t, src });
+  } else if (rec.entries[i].text === t) return;
+  else rec.entries[i].text = t;
+  localStorage.setItem('log_' + iso, JSON.stringify(rec));
+  if (iso === TODAY && data) {
+    data.entries = rec.entries.map(e => Object.assign({}, e));
+    if ($id('s-entries') && $id('s-entries').classList.contains('on')) renderEntries();
+    if ($id('s-home') && $id('s-home').classList.contains('on')) refreshHome();
+  }
+}
+function entryOf(iso, src) {
+  const r = readDay(iso);
+  const e = r && Array.isArray(r.entries) ? r.entries.find(x => x && x.src === src) : null;
+  return e ? e.text : '';
+}
+/* The stored wake-up time, for TODAY's anchor and its chain. */
+function wakeOf(iso) { const r = readDay(iso); return (r && r.m && r.m.wt) || ''; }
+
 // Build daily note
 function buildNote() {
   const m=data.m, e=data.e;
@@ -1373,6 +1431,7 @@ function buildNote() {
 | create_works    | ${cr.works.map(x => `${x.name} (${x.area} · ${x.stage})`).join('; ') || '-'} |
 | create_did      | ${cr.what.join('; ') || '-'} |` : '';
   const mediaRows = mediaNoteRows(mediaOf(e));
+  const flexRows = flexNoteRows(TODAY);
   return (
 `*:LiCalendar: ${TODAY}*
 ## planning
@@ -1430,7 +1489,44 @@ ${Object.keys(meds).map(k => `| ${('meds_' + k).padEnd(13)} | ${meds[k]?'yes':'n
 | curate_mix    | ${cur.mix} |
 | curate_prod   | ${cur.prod} |
 | curate_cont   | ${cur.cont} |
-| curate_total  | ${cur.mix + cur.prod + cur.cont} |${createRows}${studyRows}${mediaRows}`);
+| curate_total  | ${cur.mix + cur.prod + cur.cont} |${createRows}${studyRows}${mediaRows}${flexRows}`);
+}
+
+/* TODAY in the note
+   The flex day, read at note time like study and create: TODAY exposes one
+   reader over its own record and LOG stores nothing of it. Only on a day
+   something happened there, so older notes are untouched; the parser looks
+   rows up by key and ignores the ones it does not know, which is what makes
+   an extra section additive (§1, the export contract). A cell is one line —
+   a goal with a pipe or a semicolon in it has them replaced, never escaped,
+   because the Obsidian side splits on both. The dump is not here: it is an
+   entry, under #### entries, where every other journal line already is. */
+function flexNoteRows(iso) {
+  const flex = window.TODAY;
+  let s = null;
+  try { s = flex && flex.dayStats ? flex.dayStats(iso) : null; } catch { s = null; }
+  if (!s) return '';
+  const cell = v => String(v == null ? '' : v).replace(/[|]/g, '/').replace(/;/g, ',').replace(/\s+/g, ' ').trim() || '-';
+  const done = s.steps.filter(x => x.v === 'full' || x.v === 'min').length;
+  const vw = v => v === 'full' ? 'full' : v === 'min' ? 'min' : v === 'skip' ? 'skip' : '-';
+  const goals = s.goals.filter(g => g.done || g.fate !== 'dropped');
+  return `
+
+#### today
+
+| data          | ans |
+| ------------- | --: |
+| bad_day       | ${s.bad ? 'yes' : 'no'} |
+| wake_target   | ${cell(s.wakeTarget)} |
+| sleep_time    | ${cell(s.sleep)} |
+| goals_done    | ${s.goals.filter(g => g.done).length}/${goals.length} |
+| goals         | ${goals.map(g => cell(g.text) + (g.done ? ' (done)' : g.fate ? ' (' + g.fate + ')' : '')).join('; ') || '-'} |
+| chain_done    | ${done}/${s.steps.length} |
+| chain         | ${s.steps.map(x => cell(x.label) + ' ' + vw(x.v)).join('; ') || '-'} |
+| hygiene       | ${s.hyg.map(cell).join(', ') || '-'} |
+| pom_areas     | ${s.pom.map(a => cell(a.label) + ' ' + a.n).join(', ') || '-'} |
+| gym           | ${s.gym ? cell(s.gym.summary) : '-'} |
+| prep_done     | ${s.prep.filter(p => p.done).length}/${s.prep.length} |`;
 }
 
 /* Media in the note
@@ -2488,7 +2584,9 @@ function dayData(iso) {
   return {
     date: iso,
     written: (filled(m) ? 1 : 0) + (filled(e) ? 1 : 0),
-    weight: num(m.wt), sleep: num(m.sl), walked: num(m.km) ?? num(e.kme),
+    /* `m.wkg` is the weight; `m.wt` is the wake-up time, and reading it
+       here put the hour you got up on DATA's weight chart (06:20 read as 6). */
+    weight: num(m.wkg), sleep: num(m.sl), walked: num(m.km) ?? num(e.kme),
     /* Morning and evening ask the same three, so both are kept: the day's
        shape is the pair, and averaging them here would throw that away. */
     energyAm: num(m.nrg), moodAm: num(m.mood),
@@ -2522,5 +2620,6 @@ return { go, goBack, markDirty, shiftDate, resetDate, pickDate, monthShift, rend
          clearDay, renderDataScreen, exportAllData, pickImport, importAllData,
          openDeleteModal, closeModal, confirmDeleteAll, renderPlanned, setBlock, buildNote,
          setMedia, blocksBefore, toggleAlerts, saveAlerts, testAlert, refreshAlert, alertReason,
-         alertShown, dismissAlert, wakeArrows, dayData, loggedDays };
+         alertShown, dismissAlert, wakeArrows, dayData, loggedDays,
+         setEntry, entryOf, wakeOf };
 })();

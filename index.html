@@ -7,9 +7,9 @@
   <!-- Use black so iOS reserves its status-bar strip. Headers follow the safe-area
        inset; light themes retain a black system bar above the page. -->
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="ROOT">
+  <meta name="apple-mobile-web-app-title" content="qurOS">
   <meta name="theme-color" content="#0e0e0e">
-  <title>ROOT</title>
+  <title>qurOS</title>
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="apple-touch-icon" href="favicon.png">
   <!-- Android/Chrome install as a standalone app; iOS reads the apple-* metas -->
@@ -26,6 +26,7 @@
 
   <!-- tokens, app sheets, shell, settings, then themes last -->
   <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/today.css">
   <link rel="stylesheet" href="css/do.css">
   <link rel="stylesheet" href="css/log.css">
   <link rel="stylesheet" href="css/plan.css">
@@ -36,6 +37,7 @@
   <link rel="stylesheet" href="css/cal.css">
   <link rel="stylesheet" href="css/create.css">
   <link rel="stylesheet" href="css/tools.css">
+  <link rel="stylesheet" href="css/gym.css">
   <link rel="stylesheet" href="css/shell.css">
   <link rel="stylesheet" href="css/settings.css">
   <link rel="stylesheet" href="css/themes.css">
@@ -106,6 +108,21 @@
   <symbol id="tab-tools" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <circle cx="12" cy="13.5" r="7.5"/><line x1="9.5" y1="2.5" x2="14.5" y2="2.5"/>
     <line x1="12" y1="13.5" x2="15.2" y2="10.3"/>
+  </symbol>
+  <!-- TODAY: a sun coming up over a line — the day starting. Three rays, not
+       eight, and half a disc: DAY's is a whole sun. The rays are lines and the
+       disc a path, because the harness fails on two tab symbols built from the
+       same shapes. -->
+  <symbol id="tab-today" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="3" y1="18" x2="21" y2="18"/><path d="M6.5 18a5.5 5.5 0 0 1 11 0"/>
+    <line x1="12" y1="5.5" x2="12" y2="8"/><line x1="5.4" y1="9.4" x2="7.1" y2="11.1"/><line x1="18.6" y1="9.4" x2="16.9" y2="11.1"/>
+  </symbol>
+  <!-- GYM: a dumbbell — two plates either side of a bar, end on, drawn as
+       rects: five lines is CREATE's waveform, and the harness compares shapes. -->
+  <symbol id="tab-gym" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2.5" y="9.5" width="2.5" height="5" rx="1"/><rect x="5.5" y="6.5" width="3" height="11" rx="1"/>
+    <rect x="15.5" y="6.5" width="3" height="11" rx="1"/><rect x="19" y="9.5" width="2.5" height="5" rx="1"/>
+    <line x1="8.5" y1="12" x2="15.5" y2="12"/>
   </symbol>
   <!-- the "!" a tab wears in place of its own icon while something is overdue
        (Shell.alert) — one stroke and its dot, at the icon's own weight -->
@@ -268,6 +285,61 @@
 
 <div id="views">
 <div id="track">
+
+<!-- TODAY — the flex system. The home screen is the day: two anchors, the one
+     next action, the goals, the morning chain, focus, the evening. Everything
+     under the band is written by TODAY.render(); the sub-screens are the week,
+     the hygiene chain, the evening and the life-dump map. All markup here is
+     delegated through data-act (js/today.js), like TEND, CAL, CREATE and
+     TOOLS: a goal is the user's own text, and it lands in four screens. -->
+<section class="view ns-today" id="view-today" aria-label="TODAY">
+
+  <div id="s-home" class="scr on">
+    <div class="h-top">
+      <div class="h-label"><span id="ty-date">—</span><span class="h-count" id="ty-count"></span></div>
+      <div class="h-logo-row">
+        <div class="h-logo">TODAY<em>.</em></div>
+      </div>
+      <div class="h-acts">
+        <!-- one switch, one tap: the whole day collapses to its minimums -->
+        <button class="h-act td-bad" id="ty-bad" data-act="bad" role="switch" aria-checked="false">bad day</button>
+      </div>
+    </div>
+    <div class="cnt" id="ty-home"></div>
+  </div>
+
+  <div id="s-week" class="scr">
+    <div class="hd">
+      <button class="hd-back" data-act="home">← today</button>
+      <span class="hd-title">this week</span>
+    </div>
+    <div class="cnt" id="ty-week"></div>
+  </div>
+
+  <div id="s-hyg" class="scr">
+    <div class="hd">
+      <button class="hd-back" data-act="home">← today</button>
+      <span class="hd-title">hygiene</span>
+    </div>
+    <div class="cnt" id="ty-hyg"></div>
+  </div>
+
+  <div id="s-eve" class="scr">
+    <div class="hd">
+      <button class="hd-back" data-act="home">← today</button>
+      <span class="hd-title">evening</span>
+    </div>
+    <div class="cnt" id="ty-eve"></div>
+  </div>
+
+  <div id="s-dump" class="scr">
+    <div class="hd">
+      <button class="hd-back" data-act="home">← today</button>
+      <span class="hd-title">life dump</span>
+    </div>
+    <div class="cnt" id="ty-dump"></div>
+  </div>
+</section>
 
 <!-- DO -->
 <section class="view ns-do" id="view-do" aria-label="DO">
@@ -652,6 +724,46 @@
 </section>
 
 
+<!-- GYM — the A/B program. Home is the week and the next session; a session
+     is one screen of exercise cards, a set a row, and the rest timer in the
+     sticky header so it is on screen whichever card you are on. Delegated
+     through data-act (js/gym.js). -->
+<section class="view ns-gym" id="view-gym" aria-label="GYM">
+
+  <div id="s-home" class="scr on">
+    <div class="h-top">
+      <div class="h-label" id="gy-label">this week</div>
+      <div class="h-logo-row">
+        <div class="h-logo">GYM<em>.</em></div>
+        <div class="h-daynum" id="gy-daynum" aria-hidden="true"><span class="dn-cur"></span></div>
+      </div>
+    </div>
+    <div class="cnt" id="gy-home"></div>
+  </div>
+
+  <div id="s-sess" class="scr">
+    <!-- the header and the rest timer stick together: the timer is the one
+         thing on this screen you need whichever card you have scrolled to -->
+    <div class="gy-top">
+      <div class="hd">
+        <button class="hd-back" data-act="home">← gym</button>
+        <span class="hd-title" id="gy-sess-title">session</span>
+        <button class="hd-action" data-act="finish">finish</button>
+      </div>
+      <div class="gy-rest" id="gy-rest" hidden></div>
+    </div>
+    <div class="cnt" id="gy-sess"></div>
+  </div>
+
+  <div id="s-past" class="scr">
+    <div class="hd">
+      <button class="hd-back" data-act="home">← gym</button>
+      <span class="hd-title" id="gy-past-title">session</span>
+    </div>
+    <div class="cnt" id="gy-past"></div>
+  </div>
+</section>
+
 <!-- PLAN -->
 <section class="view ns-plan" id="view-plan" aria-label="PLAN">
 
@@ -795,14 +907,20 @@
       </div>
 
       <!-- QUICK ACTIONS -->
-      <div class="qa-grid">
+      <div class="qa-grid three">
         <div class="card" onclick="STORE.go('items')">
           <div class="card-t"><svg class="ico"><use href="#ico-list"/></svg>Items</div>
           <div class="card-s">by category</div>
         </div>
         <div class="card" onclick="STORE.go('meals')">
           <div class="card-t"><svg class="ico"><use href="#ico-meal"/></svg>Meals</div>
-          <div class="card-s">premade dishes</div>
+          <div class="card-s">recipes + lists</div>
+        </div>
+        <!-- the walk shop and the car shop, as Todoist has them: parent tasks
+             with a date and what is on each — STORE's trips screen -->
+        <div class="card" data-sact="trips">
+          <div class="card-t"><svg class="ico"><use href="#ico-cal"/></svg>Trips</div>
+          <div class="card-s">walk · car</div>
         </div>
       </div>
       <div class="card full muted" onclick="STORE.go('history')">
@@ -834,15 +952,38 @@
     </div>
   </div>
 
-  <!-- MEALS ── -->
+  <!-- MEALS ── the recipe library first (store.recipes), then the older
+       premade lists (store.meals), which are ingredients and nothing else -->
   <div id="s-meals" class="scr">
     <div class="hd">
       <button class="hd-back" onclick="STORE.go('home')">← back</button>
-      <span class="hd-title">premade meals</span>
+      <span class="hd-title">meals</span>
     </div>
     <div class="cnt">
+      <div class="sec"><span>recipes</span></div>
+      <div id="recipe-list"></div>
+      <div class="sec"><span>quick lists <em>ingredients only</em></span></div>
       <div id="meal-list"></div>
     </div>
+  </div>
+
+  <!-- ONE RECIPE ── scale, choices, sides, ingredients, steps with timers,
+       and the button that sends what is missing to the grocery list -->
+  <div id="s-recipe" class="scr">
+    <div class="hd">
+      <button class="hd-back" onclick="STORE.go('meals')">← meals</button>
+      <span class="hd-title" id="recipe-title">recipe</span>
+    </div>
+    <div class="cnt" id="recipe-body"></div>
+  </div>
+
+  <!-- TRIPS ── the walk shop and the car shop, read from Todoist -->
+  <div id="s-trips" class="scr">
+    <div class="hd">
+      <button class="hd-back" onclick="STORE.go('home')">← back</button>
+      <span class="hd-title">trips</span>
+    </div>
+    <div class="cnt" id="trips-body"></div>
   </div>
 
   <!-- HISTORY ── -->
@@ -1185,7 +1326,7 @@
   <div id="s-home" class="scr on">
     <div class="h-top">
       <div class="h-label">make it yours</div>
-      <div class="h-logo">ROOT<em>.</em></div>
+      <div class="h-logo">qurOS<em>.</em></div>
     </div>
     <div class="set-home" id="set-home"></div>
   </div>
@@ -1372,6 +1513,100 @@
     </div>
 
     <!-- DO ── -->
+    <div class="set-panel ns-today" data-panel="today">
+      <div class="sec"><span>Status</span></div>
+      <div class="settings-status idle" id="ty-status">—</div>
+
+      <div class="sec"><span>The two clock times</span></div>
+      <div class="set-note">Wake and sleep are the only clock times in the day — no hours, no blocks.
+        The wake time itself comes from LOG's morning form, or from the one-tap "I'm up" on TODAY.
+        A blank sleep target draws nothing and judges nothing.</div>
+      <div class="ed-pair">
+        <div class="f"><label class="lbl">Wake target</label>
+          <input type="text" inputmode="numeric" data-pad="clock" autocomplete="off" data-cfg="today.anchors" data-sub="wake" placeholder="06:00" aria-label="wake target"></div>
+        <div class="f"><label class="lbl">Sleep target<em>blank: none</em></label>
+          <input type="text" inputmode="numeric" data-pad="clock" autocomplete="off" data-cfg="today.anchors" data-sub="sleep" placeholder="—" aria-label="sleep target"></div>
+      </div>
+      <div class="ed-pair">
+        <div class="f"><label class="lbl">On time for<em>minutes past the target</em></label>
+          <input type="number" inputmode="numeric" min="0" max="180" step="5" data-unit="min" data-cfg="today.anchors" data-sub="grace" aria-label="grace minutes"></div>
+        <div class="f"><label class="lbl">Evening from<em>when the next step turns to the evening</em></label>
+          <input type="text" inputmode="numeric" data-pad="clock" autocomplete="off" data-cfg="today.anchors" data-sub="eveningFrom" placeholder="18:00" aria-label="evening starts"></div>
+      </div>
+      <div class="f"><label class="lbl">The day ends at<em>later than midnight keeps a late dump on the day it is about</em></label>
+        <select data-cfg="today.anchors" data-sub="dayEnds" aria-label="the day ends at">
+          <option value="00:00">midnight</option><option value="01:00">01:00</option><option value="02:00">02:00</option>
+          <option value="03:00">03:00</option><option value="04:00">04:00</option><option value="05:00">05:00</option>
+        </select></div>
+
+      <div class="sec"><span>Goals</span></div>
+      <div class="set-note">Goals, not a schedule: a few small things a day, a few a week. The cap is hard —
+        a fourth goal is a sign the first three were too big.</div>
+      <div class="ed-pair">
+        <div class="f"><label class="lbl">A day<em>1 to 3</em></label>
+          <input type="number" inputmode="numeric" min="1" max="3" step="1" data-cfg="today.goals" data-sub="cap" aria-label="goals a day"></div>
+        <div class="f"><label class="lbl">A week<em>1 to 3</em></label>
+          <input type="number" inputmode="numeric" min="1" max="3" step="1" data-cfg="today.goals" data-sub="weekCap" aria-label="goals a week"></div>
+      </div>
+      <div class="f"><label class="lbl">The hint under the field<em>blank: no hint</em></label>
+        <input type="text" maxlength="140" data-cfg="today.goals" data-sub="hint" aria-label="goal hint"></div>
+      <div class="setting-row">
+        <span class="setting-lbl">Offer yesterday's unfinished goals<small>carry or drop, one tap each — no penalty either way</small></span>
+        <button class="tog" data-cfg-toggle="today.goals.carry" role="switch" aria-checked="true" aria-label="offer carry or drop"></button>
+      </div>
+
+      <div class="sec"><span>The home screen</span></div>
+      <div class="set-note">It leads with the one next action. Everything else is secondary — these say how much of it is drawn.</div>
+      <div class="opt-set"><label class="lbl">The morning chain<em>under the next step</em></label>
+        <div class="chips"><button class="chip" data-pref="todayChain" data-val="fold">folded</button>
+          <button class="chip" data-pref="todayChain" data-val="open">open</button></div></div>
+      <div class="setting-row"><span class="setting-lbl">This week's goals<small>a strip above today's</small></span>
+        <button class="tog" data-pref="todayWeek" data-toggle="1" role="switch" aria-checked="true" aria-label="show the week strip"></button></div>
+      <div class="setting-row"><span class="setting-lbl">Focus<small>the pomodoro, one tap from the day</small></span>
+        <button class="tog" data-pref="todayFocus" data-toggle="1" role="switch" aria-checked="true" aria-label="show focus"></button></div>
+      <div class="setting-row"><span class="setting-lbl">Life dump<small>the next untouched item, once a map is loaded</small></span>
+        <button class="tog" data-pref="todayDumpRow" data-toggle="1" role="switch" aria-checked="true" aria-label="show the life dump row"></button></div>
+
+      <div class="sec"><span>Bad day</span></div>
+      <div class="set-note">One switch on TODAY collapses every habit to its minimum and hides everything else.
+        It is logged as a bad day — neutral, for spotting patterns later, never a mark against anything.</div>
+      <div class="setting-row"><span class="setting-lbl">Keep the goals<small>on a bad day too</small></span>
+        <button class="tog" data-cfg-toggle="today.badDay.keepGoals" role="switch" aria-checked="false" aria-label="keep goals on a bad day"></button></div>
+      <div class="setting-row"><span class="setting-lbl">Keep focus<small>the pomodoro card on a bad day</small></span>
+        <button class="tog" data-cfg-toggle="today.badDay.keepFocus" role="switch" aria-checked="false" aria-label="keep focus on a bad day"></button></div>
+      <div class="f"><label class="lbl">What it says</label>
+        <input type="text" maxlength="140" data-cfg="today.badDay" data-sub="note" aria-label="bad day note"></div>
+
+      <div class="sec"><span>The evening export</span></div>
+      <div class="set-note">The markdown the evening screen shares, made for pasting into a qurOS chat. These
+        say which sections it carries. The Obsidian note keeps its own shape: TODAY adds a <b>#### today</b>
+        table to it, and the dump goes in as an entry.</div>
+      <div class="set-checks" id="ty-export"></div>
+
+      <div class="sec"><span>The shower</span></div>
+      <div class="ed-pair">
+        <div class="f"><label class="lbl">Timer<em>minutes</em></label>
+          <input type="number" inputmode="numeric" min="1" max="30" step="1" data-unit="min" data-cfg="today.showerMins" aria-label="shower minutes"></div>
+        <div class="f"><label class="lbl">The line under it</label>
+          <input type="text" maxlength="160" data-cfg="today.showerNote" aria-label="shower note"></div>
+      </div>
+
+      <div class="sec"><span>Life dump map</span></div>
+      <div class="set-note">Loaded from <b>qurOS-life-dump-map.md</b> in the app folder, from a file, or pasted —
+        on TODAY's life-dump screen. What you mark is kept per item and survives a re-import.</div>
+      <div class="settings-status idle" id="ty-map-status">—</div>
+      <div class="f"><label class="lbl">How a walk prompt starts</label>
+        <input type="text" maxlength="200" data-cfg="today.dumpPrompt" aria-label="walk prompt"></div>
+
+      <div class="sec"><span>Reset</span></div>
+      <div class="setting-row">
+        <span class="setting-lbl">Clear today<small>goals, ticks, prep and stamps — undoable</small></span>
+        <button class="setting-btn danger" data-act="reset-day">clear</button>
+      </div>
+
+      <div data-content-for="today"></div>
+    </div>
+
     <div class="set-panel ns-do" data-panel="do">
       <div class="sec">Home layout</div>
       <div class="data-warn">The order of the sections on DO's first tab. The today list and the block tasks show on that tab only.</div>
@@ -1413,7 +1648,7 @@
 
       <div class="sec">Todoist target</div>
       <div class="data-warn hidden" id="td-file-warn">
-        ROOT is open as a local file, so the browser will block calls to Todoist.
+        qurOS is open as a local file, so the browser will block calls to Todoist.
         Serve it over http(s) — e.g. GitHub Pages — for sync to work.
       </div>
       <div class="f">
@@ -1596,6 +1831,55 @@
     </div>
 
     <!-- PLAN ── -->
+    <div class="set-panel ns-gym" data-panel="gym">
+      <div class="sec"><span>Status</span></div>
+      <div class="settings-status idle" id="gy-status">—</div>
+
+      <div class="sec"><span>The week</span></div>
+      <div class="set-note">Sessions a week, shown as a range — "2 of 3–4" — and never as a streak.
+        A minimum session counts as a gym day.</div>
+      <div class="ed-pair">
+        <div class="f"><label class="lbl">At least</label>
+          <input type="number" inputmode="numeric" min="1" max="7" step="1" data-cfg="gym.target" data-sub="lo" aria-label="sessions a week, at least"></div>
+        <div class="f"><label class="lbl">At most</label>
+          <input type="number" inputmode="numeric" min="1" max="7" step="1" data-cfg="gym.target" data-sub="hi" aria-label="sessions a week, at most"></div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-lbl">A Kamo walk counts as movement<small>on a day with no session — read from TODAY's chain</small></span>
+        <button class="tog" data-act="gym-walk" id="gy-walk" role="switch" aria-checked="true" aria-label="walk counts as movement"></button>
+      </div>
+
+      <div class="sec"><span>A session</span></div>
+      <div class="ed-pair">
+        <div class="f"><label class="lbl">Rest<em>seconds between sets</em></label>
+          <input type="number" inputmode="numeric" min="15" max="600" step="15" data-unit="s" data-cfg="gym.rest" aria-label="rest seconds"></div>
+        <div class="f"><label class="lbl">Add weight by<em>what the hint suggests</em></label>
+          <input type="number" inputmode="decimal" min="0.25" max="50" step="0.25" data-cfg="gym.increment" aria-label="weight increment"></div>
+      </div>
+      <div class="ed-pair">
+        <div class="f"><label class="lbl">Weight unit</label>
+          <select data-cfg="gym.unit" aria-label="weight unit"><option value="kg">kg</option><option value="lb">lb</option></select></div>
+        <div class="f"><label class="lbl">Rest choices<em>seconds, comma separated</em></label>
+          <input type="text" data-cfg="gym.restChoices" data-numlist="1" aria-label="rest choices"></div>
+      </div>
+      <div class="setting-row"><span class="setting-lbl">Start the rest timer on every set<small>off: start it from the session</small></span>
+        <button class="tog" data-pref="gymAutoRest" data-toggle="1" role="switch" aria-checked="true" aria-label="auto rest"></button></div>
+      <div class="f"><label class="lbl">Warm-up</label>
+        <input type="text" maxlength="80" data-cfg="gym.warmup" aria-label="warm-up"></div>
+      <div class="f"><label class="lbl">The minimum session</label>
+        <input type="text" maxlength="80" data-cfg="gym.minimum" aria-label="minimum session"></div>
+      <div class="f"><label class="lbl">Tick on DO when a session is done<em>routine | item, blank for none</em></label>
+        <input type="text" maxlength="80" data-cfg="gym.doLink" placeholder="fit|exercise" aria-label="DO link"></div>
+
+      <div class="sec"><span>Reset</span></div>
+      <div class="setting-row">
+        <span class="setting-lbl">Reset GYM<small>every session goes; the program stays — undoable</small></span>
+        <button class="setting-btn danger" data-act="gym-reset">reset</button>
+      </div>
+
+      <div data-content-for="gym"></div>
+    </div>
+
     <div class="set-panel ns-plan" data-panel="plan">
       <div class="sec">Todoist projects</div>
       <div id="conn-status" class="settings-status idle">no Todoist key yet — add one under data</div>
@@ -1622,7 +1906,7 @@
 
       <div class="sec"><span>Todoist target</span></div>
       <div class="data-warn hidden" id="td-file-warn">
-        ROOT is open as a local file, so the browser will block calls to Todoist.
+        qurOS is open as a local file, so the browser will block calls to Todoist.
         Serve it over http(s) — e.g. GitHub Pages — for sync to work.
       </div>
       <div class="f">
@@ -1759,7 +2043,7 @@
       <div class="td-last" id="tt-last">never synced</div>
 
       <div class="sec"><span>Backup</span></div>
-      <div class="data-warn">TEND's own format — the plants and their full care history, readable by the standalone app too. The ROOT backup under <strong>data</strong> carries it as well.</div>
+      <div class="data-warn">TEND's own format — the plants and their full care history, readable by the standalone app too. The qurOS backup under <strong>data</strong> carries it as well.</div>
       <div class="td-acts">
         <button class="setting-btn" data-act="copy">copy</button>
         <button class="setting-btn" data-act="download">download .json</button>
@@ -1833,7 +2117,7 @@
       </div>
 
       <div class="sec"><span>Backup</span></div>
-      <div class="data-warn">TRACK's own format — every tick with its date, plus the dates above. The ROOT backup under <strong>data</strong> carries it as well.</div>
+      <div class="data-warn">TRACK's own format — every tick with its date, plus the dates above. The qurOS backup under <strong>data</strong> carries it as well.</div>
       <div class="btnRow">
         <button class="btn btn-2" onclick="TRACK.exportData()">export</button>
         <button class="btn btn-2" onclick="TRACK.pickImport()">import</button>
@@ -1877,7 +2161,7 @@
       <div id="learn-stats"></div>
       <div class="data-warn">
         Decks, cards and media live in this browser's IndexedDB, not in
-        localStorage — so they are <strong>not in the ROOT backup file</strong>.
+        localStorage — so they are <strong>not in the backup file</strong>.
         A new device needs the .apkg imported again; ratings do not travel.
       </div>
 
@@ -2032,7 +2316,7 @@
       <div class="settings-status idle" id="cr-status">nothing on the shelf yet</div>
       <div class="data-warn">
         The songs, the mixes, their ticks, their notes and every session are in
-        this browser under <code>create_v1</code>, and the ROOT backup under
+        this browser under <code>create_v1</code>, and the qurOS backup under
         <strong>data</strong> carries them as well. Nothing on the shelf is ever
         sent anywhere.
       </div>
@@ -2154,11 +2438,17 @@
      slides) from Settings → layout → "apps in the bar", and hides the ones
      switched off, so the order here is only the shipped default. -->
 <nav id="nav" role="tablist" aria-label="Apps">
+  <button class="tab-b" data-app="today" role="tab" aria-selected="false" aria-label="TODAY">
+    <svg aria-hidden="true"><use href="#tab-today"/></svg><span class="tb-l">today</span>
+  </button>
   <button class="tab-b" data-app="do" role="tab" aria-selected="false" aria-label="DO">
     <svg aria-hidden="true"><use href="#tab-do"/></svg><span class="tb-l">do</span>
   </button>
   <button class="tab-b" data-app="log" role="tab" aria-selected="false" aria-label="LOG">
     <svg aria-hidden="true"><use href="#tab-log"/></svg><span class="tb-l">log</span>
+  </button>
+  <button class="tab-b" data-app="gym" role="tab" aria-selected="false" aria-label="GYM">
+    <svg aria-hidden="true"><use href="#tab-gym"/></svg><span class="tb-l">gym</span>
   </button>
   <button class="tab-b" data-app="plan" role="tab" aria-selected="false" aria-label="PLAN">
     <svg aria-hidden="true"><use href="#tab-plan"/></svg><span class="tb-l">plan</span>
@@ -2268,13 +2558,13 @@
      A .sheet-back sheet, so Escape closes it and the shell's own shortcuts step
      aside while it is up (js/search.js). -->
 <div class="sheet-back" id="search-back"></div>
-<div class="sheet" id="search" role="dialog" aria-label="Search ROOT">
+<div class="sheet" id="search" role="dialog" aria-label="Search qurOS">
   <div class="sheet-head">
     <span class="sheet-ttl"><svg class="sr-ico" aria-hidden="true"><use href="#ico-search"/></svg>search</span>
     <button class="sheet-close" id="search-close">close</button>
   </div>
   <input type="search" id="search-q" placeholder="an app, an item, a setting…"
-         autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="search ROOT">
+         autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="search qurOS">
   <div id="search-out"></div>
 </div>
 
@@ -2283,7 +2573,7 @@
 <div id="rotate" aria-hidden="true">
   <div class="r-ico">▯</div>
   <div class="r-t">turn it back upright</div>
-  <div class="r-s">ROOT is a portrait app · switch this off under settings → behaviour</div>
+  <div class="r-s">qurOS is a portrait app · switch this off under settings → behaviour</div>
 </div>
 
 <!-- LOG — delete-everything modal -->
@@ -2374,6 +2664,16 @@
     </div>
   </div>
 
+  <!-- groceries from a recipe: what is missing, and which trip it is for -->
+  <div class="sheet-back" id="gs-back" data-sact="gs-close"></div>
+  <div class="pad" id="gsheet" role="dialog" aria-label="add to groceries">
+    <div class="pad-head">
+      <span class="pad-ttl">to the grocery list</span>
+      <button class="pad-close" data-sact="gs-close">cancel</button>
+    </div>
+    <div id="gs-body"></div>
+  </div>
+
   <!-- category picker -->
   <div class="sheet-back" id="cp-back" onclick="STORE.closeCatPick()"></div>
   <div class="pad" id="catpick">
@@ -2444,6 +2744,12 @@
 <script src="js/cal.js"></script>
 <script src="js/create.js"></script>
 <script src="js/tools.js"></script>
+<!-- GYM, then TODAY last of the apps: TODAY draws the day out of every other
+     app (LOG's wake time, GYM's session, TOOLS' focus rounds, DO's routine
+     ticks), so it boots once all of them exist. Each reads the others lazily,
+     at render time, so nothing here depends on the order beyond that. -->
+<script src="js/gym.js"></script>
+<script src="js/today.js"></script>
 <!-- after every app, because it reads their storage keys, and before settings,
      which draws its two buttons. No app module knows it exists. -->
 <script src="js/sync.js"></script>

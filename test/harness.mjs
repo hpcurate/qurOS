@@ -1,5 +1,7 @@
-// ROOT boot + behaviour harness (jsdom).
-//   cd root/test && npm install && node harness.mjs [path-to-root]
+// qurOS boot + behaviour harness (jsdom) — root's, carried over whole.
+//   cd test && npm install && node harness.mjs [path-to-app]
+// The checks written for root still run against every app; qurOS's own (TODAY,
+// GYM, the pomodoro areas, the recipes, the flex links) are in test/flex.mjs.
 // Boots the real index.html with the scripts read from disk (stylesheets and
 // fonts are skipped — jsdom does not lay out or paint), then drives it through
 // DOM events. Every behaviour fixed in 2.1 has a check here; add one for each
@@ -101,6 +103,18 @@ check('all themes apply', d.documentElement.dataset.theme === 'noir');
 w.Prefs.set('theme', 'void');
 for (const p of ['look','layout','behave','do','log','plan','store','tend','track','learn','create','data']) w.SET.panel(p);
 check('every settings panel renders', errors.length === 0, errors.slice(0, 3).join(' | '));
+
+// 1b. qurOS — the shipped bar, then every app in it for the checks that follow
+check('qurOS opens on TODAY, with GYM in the bar and PLAN and DAY out of it',
+  w.Shell.TABS[0] === 'today' && w.Shell.TABS.includes('gym') &&
+  !w.Shell.TABS.includes('plan') && !w.Shell.TABS.includes('cal') && $('.tab-b.on')?.dataset.app === 'today',
+  w.Shell.TABS.join(','));
+check('PLAN and DAY still ship, opened from the settings home', w.Shell.hidden().join(',') === 'plan,cal',
+  w.Shell.hidden().join(','));
+check('qurOS keeps its own prefs and its own last tab, apart from root\'s',
+  w.Prefs.KEY === 'quros_prefs_v1' && !!w.localStorage.getItem('quros_prefs_v1') && !w.localStorage.getItem('root_tab'));
+const everyApp = () => w.Prefs.set('apps', w.Prefs.APPS.slice());
+everyApp();
 
 // 2. settings routing
 w.Shell.go('plan');
@@ -295,14 +309,14 @@ w.Config.reset('log.streakRequires');
 
 // 15. 2.2 — three more apps in the track
 check('TEND, TRACK, LEARN defined', ['TEND', 'TRACK', 'LEARN'].every(k => w[k]));
-check('eleven tabs, settings last', w.Shell.TABS.length === 11 && w.Shell.TABS[10] === 'settings', w.Shell.TABS.join(','));
+check('thirteen tabs, settings last', w.Shell.TABS.length === 13 && w.Shell.TABS[12] === 'settings', w.Shell.TABS.join(','));
 check('the pill no longer flags "many" tabs (the arrows always stay)', d.documentElement.dataset.tabs === undefined);
 errors.length = 0;
 for (const p of ['tend', 'track', 'learn']) w.SET.panel(p);
 check('the three new settings panels render', errors.length === 0, errors.slice(0, 3).join(' | '));
 w.Shell.go('do');
-key('5'); check('key 5 jumps to TEND', $('.tab-b.on')?.dataset.app === 'tend', $('.tab-b.on')?.dataset.app);
-key('7'); check('key 7 jumps to LEARN', $('.tab-b.on')?.dataset.app === 'learn', $('.tab-b.on')?.dataset.app);
+key('7'); check('key 7 jumps to TEND', $('.tab-b.on')?.dataset.app === 'tend', $('.tab-b.on')?.dataset.app);
+key('9'); check('key 9 jumps to LEARN', $('.tab-b.on')?.dataset.app === 'learn', $('.tab-b.on')?.dataset.app);
 
 /* 4.5 — the rebindable keys and the desktop frame.
    The roving cursor itself is deliberately not checked here: it filters on
@@ -314,7 +328,7 @@ check('keyMap ships as a, e, comma, o and space',
   ['prev','next','up','down','act'].map(a => kmWas[a]).join('') === 'ae,o ', JSON.stringify(kmWas));
 
 w.Shell.go('plan');
-key('a'); check('the bound key steps to the previous tab', $('.tab-b.on')?.dataset.app === 'log',
+key('a'); check('the bound key steps to the previous tab', $('.tab-b.on')?.dataset.app === 'gym',
   $('.tab-b.on')?.dataset.app);
 key('e'); check('the bound key steps to the next tab', $('.tab-b.on')?.dataset.app === 'plan',
   $('.tab-b.on')?.dataset.app);
@@ -327,7 +341,7 @@ key('ArrowLeft'); check('the arrows no longer change tab — they are all cursor
 
 w.Prefs.set('keyMap', Object.assign({}, kmWas, { prev: 'q' }));
 w.Shell.go('plan');
-key('q'); check('a rebound key takes effect', $('.tab-b.on')?.dataset.app === 'log',
+key('q'); check('a rebound key takes effect', $('.tab-b.on')?.dataset.app === 'gym',
   $('.tab-b.on')?.dataset.app);
 w.Shell.go('plan');
 key('a'); check('the key it replaced goes dead', $('.tab-b.on')?.dataset.app === 'plan',
@@ -371,14 +385,15 @@ check('app list reorders the track', w.Shell.TABS.join(',') === 'track,do,settin
 check('a switched-off app has no tab', $('.tab-b[data-app="log"]').classList.contains('hidden') && $('#view-log').classList.contains('hidden'));
 check('landed on the first shown app after LEARN was hidden', $('.tab-b.on')?.dataset.app === 'track', $('.tab-b.on')?.dataset.app);
 w.Prefs.reset('apps');
-check('reset restores all eleven in shipped order', w.Shell.TABS.join(',') === 'do,log,plan,store,tend,track,learn,cal,create,tools,settings', w.Shell.TABS.join(','));
+check('reset restores the shipped bar in shipped order', w.Shell.TABS.join(',') === 'today,do,log,gym,store,tend,track,learn,create,tools,settings', w.Shell.TABS.join(','));
+everyApp();
 w.Prefs.set('colorfulTabs', true);
 check('colour-coded tabs are keyed by app, not position', errors.length === 0);   // CSS only; boot did not throw
 w.Prefs.set('colorfulTabs', false);
 
 // the tab colours: one per tab, overridable, and lent to the app you are on
 const rootTabs = (fs.readFileSync(path.join(ROOT, 'css/themes.css'), 'utf8')
-  .match(/:root{--tab-do:[^}]*}/) || [''])[0];
+  .match(/:root{--tab-[^}]*}/) || [''])[0];
 check('every tab in the bar ships with a hue',
   w.Prefs.TAB_IDS.every(a => rootTabs.includes(w.Prefs.tabVar(a) + ':')),
   w.Prefs.TAB_IDS.filter(a => !rootTabs.includes(w.Prefs.tabVar(a) + ':')).join(',') || 'all present');
@@ -832,7 +847,7 @@ check('settings opens on a home menu with four categories', $('.ns-set #s-home')
   [...d.querySelectorAll('.ns-set .set-cat-b')].map(b => b.dataset.cat).join(',') === 'apps,appearance,sync,data');
 check('with every app in the bar the home lists none', !$('.ns-set [data-open]'));
 w.Prefs.set('apps', ['do', 'log']);
-check('apps switched off are listed on the settings home', [...d.querySelectorAll('.ns-set [data-open]')].map(b => b.dataset.open).join(',') === 'plan,store,tend,track,learn,cal,create,tools',
+check('apps switched off are listed on the settings home', [...d.querySelectorAll('.ns-set [data-open]')].map(b => b.dataset.open).join(',') === 'today,gym,plan,store,tend,track,learn,cal,create,tools',
   [...d.querySelectorAll('.ns-set [data-open]')].map(b => b.dataset.open).join(','));
 click($('.ns-set [data-open="tend"]')); await tick();
 check('opening one shows its slide, just before settings, with no tab', w.Shell.TABS.join(',') === 'do,log,tend,settings' &&
@@ -841,10 +856,10 @@ check('opening one shows its slide, just before settings, with no tab', w.Shell.
 w.Shell.go('settings'); await tick(400);
 check('leaving it retires the slide again', w.Shell.TABS.join(',') === 'do,log,settings' && $('#view-tend').classList.contains('hidden') &&
   $('.tab-b.on')?.dataset.app === 'settings', w.Shell.TABS.join(','));
-w.Prefs.reset('apps');
+w.Prefs.reset('apps'); everyApp();
 w.SET.panel('do');
 check('an app panel sits in the apps category behind its pill bar', $('.ns-set #s-cat').classList.contains('on') && $('.ns-set #set-cat-title').textContent === 'apps' &&
-  [...d.querySelectorAll('.ns-set #set-seg .seg-b')].map(b => b.dataset.seg).join(',') === 'do,log,plan,store,tend,track,learn,cal,create,tools' &&
+  [...d.querySelectorAll('.ns-set #set-seg .seg-b')].map(b => b.dataset.seg).join(',') === 'today,do,log,gym,plan,store,tend,track,learn,cal,create,tools' &&
   $('.ns-set .set-panel.on')?.dataset.panel === 'do');
 check("the app's content editors live at the end of its own panel", !!$('.ns-set [data-content-for="do"] [data-group="do.routines"]') &&
   !!$('.ns-set [data-content-for="do"] input[data-cfg="do.mediaLabels"]') && !$('.ns-set [data-content-for="do"] [data-group="log.blocks"]'));
@@ -860,8 +875,9 @@ check('back returns to the home menu', $('.ns-set #s-home').classList.contains('
 
 // 23. 2.9 — the left arrow as back, tap-the-tab-for-home, the settings icon, → tomorrow ─
 const prev = $('#nav-prev');
-w.Shell.go('do'); await tick();
+w.Shell.go('today'); await tick();
 check('on an app home the left arrow is the previous-tab arrow', !prev.classList.contains('is-back') && prev.disabled);
+w.Shell.go('do'); await tick();
 w.DO.openRoutine(R1); await tick();
 check('inside a sub-screen it becomes that screen\'s back button', prev.classList.contains('is-back') && !prev.disabled && prev.getAttribute('aria-label') === 'Back');
 click(prev); await tick();
@@ -881,7 +897,7 @@ check("on an app opened from settings the settings button wears that app's icon"
 click(setBtn); await tick(400);
 check('… and tapping it goes to the settings home, retiring the slide', $('.ns-set #s-home').classList.contains('on') && w.Shell.TABS.join(',') === 'do,log,settings' &&
   setBtn.querySelector('use').getAttribute('href') === '#tab-set' && setBtn.querySelector('.tb-l').textContent === 'set', w.Shell.TABS.join(','));
-w.Prefs.reset('apps');
+w.Prefs.reset('apps'); everyApp();
 
 // → tomorrow: the open fetched tasks are rescheduled and drop off the list
 const tmOpen = new Map([
@@ -1977,7 +1993,7 @@ w.Config.reset('log.alerts');
 w.PLAN.clearQueue(); settle();
 
 // 30. 2.20 — the exported day, drawn as a calendar
-w.Prefs.reset('apps');
+w.Prefs.reset('apps'); everyApp();
 w.Shell.go('cal');
 
 /* The line §8 draws around PLAN is drawn around CAL too: it is a view of what
@@ -4552,7 +4568,7 @@ check('… and PLAN’s day stepper is the same control, so it wears the same th
   /\.ns-plan \.dstep-a\{[^}]*font:800 14px\/1 var\(--head\)/.test(planCss41) &&
   /\.ns-plan \.dstep-a\{[^}]*text-shadow:var\(--title-sh-x\) 0 0 var\(--title-sh-c\)/.test(planCss41));
 /* The shadow is composed at the point of use. A `--title-sh` that pre-resolved
-   its colour is the bug 3.0.1 spent a version on — see ROOT.md §6. */
+   its colour is the bug 3.0.1 spent a version on — see QUROS.md §6. */
 check('… composed at the point of use, never through a token that bakes the colour in',
   !/--title-sh:/.test(logCss41) && !/--title-sh:/.test(planCss41) &&
   !/--title-sh:/.test(tokensCss41));
@@ -5082,7 +5098,7 @@ async function bootWith(seed, configSeed, storeSeed) {
       win.confirm = () => true;
       win.fetch = async () => ({ ok: false, status: 599, json: async () => ({}), text: async () => '' });
       win.navigator.vibrate = () => true;
-      win.localStorage.setItem('root_prefs_v1', JSON.stringify(seed));
+      if (seed) win.localStorage.setItem('quros_prefs_v1', JSON.stringify(seed));
       if (configSeed) win.localStorage.setItem('root_config_v1', JSON.stringify(configSeed));
       // anything else this install is meant to have already stored
       Object.keys(storeSeed || {}).forEach(k => win.localStorage.setItem(k, JSON.stringify(storeSeed[k])));
@@ -5100,13 +5116,13 @@ check('a new app reaches an install whose app list predates it',
   !w2.document.querySelector('.tab-b[data-app="cal"]').classList.contains('hidden'),
   w2.Prefs.get('apps').join(','));
 check('… in its shipped position, not tacked onto the end of settings',
-  w2.Prefs.get('apps').join(',') === 'do,log,track,cal,create,tools', w2.Prefs.get('apps').join(','));
+  w2.Prefs.get('apps').join(',') === 'today,do,log,gym,track,cal,create,tools', w2.Prefs.get('apps').join(','));
 check('… while the apps that install had switched off stay switched off',
   ['plan', 'store', 'tend', 'learn'].every(a => !w2.Prefs.get('apps').includes(a)),
   w2.Prefs.get('apps').join(','));
 check('… and the migration records what it offered, so it runs once and not every boot',
   w2.Prefs.get('appsSeen').includes('cal') &&
-  JSON.parse(w2.localStorage.getItem('root_prefs_v1')).appsSeen.includes('cal'),
+  JSON.parse(w2.localStorage.getItem('quros_prefs_v1')).appsSeen.includes('cal'),
   JSON.stringify(w2.Prefs.get('appsSeen')));
 
 // an install that has already been offered CAL and turned it off keeps it off
@@ -5229,8 +5245,8 @@ check('a stored Interface scale is dropped, not folded into Spacing',
   w4.Prefs.get('density') + ' / ' + w4.Prefs.get('uiScale'));
 check('... the repair is recorded, so it runs once and not on every boot',
   w4.Prefs.get('densRepair') === true &&
-  JSON.parse(w4.localStorage.getItem('root_prefs_v1')).densRepair === true &&
-  JSON.parse(w4.localStorage.getItem('root_prefs_v1')).uiScale === undefined);
+  JSON.parse(w4.localStorage.getItem('quros_prefs_v1')).densRepair === true &&
+  JSON.parse(w4.localStorage.getItem('quros_prefs_v1')).uiScale === undefined);
 const w5 = await bootWith({ density: 1.25, densRepair: true, theme: 'void' });
 check('... and a Spacing chosen after the repair is left alone',
   Math.abs(w5.Prefs.get('density') - 1.25) < 1e-9, String(w5.Prefs.get('density')));

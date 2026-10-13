@@ -12,17 +12,17 @@ const $all = sel => document.querySelectorAll(SCOPE + sel);
 const esc  = s => String(s == null ? '' : s)
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-const PANELS = ['look','layout','behave','do','log','plan','store','tend','track','learn','cal','create','tools','sync','data'];
+const PANELS = ['look','layout','behave','today','do','log','gym','plan','store','tend','track','learn','cal','create','tools','sync','data'];
 /* Which category a panel sits in, and what its pill says. `data` is a single
    panel, so its category shows no pill bar. */
 const CATS = {
-  apps:       { title:'apps',       hint:"each app's own settings and content", panels:['do','log','plan','store','tend','track','learn','cal','create','tools'] },
+  apps:       { title:'apps',       hint:"each app's own settings and content", panels:['today','do','log','gym','plan','store','tend','track','learn','cal','create','tools'] },
   appearance: { title:'appearance', hint:'theme, layout, behaviour',            panels:['look','layout','behave'] },
   sync:       { title:'sync',       hint:'two devices, one board — what travels and how often', panels:['sync'] },
   data:       { title:'data',       hint:'todoist key, backup, storage, resets', panels:['data'] },
 };
 const SEG_NAMES = { look:'look', layout:'layout', behave:'behaviour', data:'data', sync:'sync',
-                    do:'do', log:'log', plan:'plan', store:'store', tend:'tend', track:'track', learn:'learn', cal:'day',
+                    today:'today', gym:'gym', do:'do', log:'log', plan:'plan', store:'store', tend:'tend', track:'track', learn:'learn', cal:'day',
                     create:'create', tools:'tools' };
 const catOf = name => Object.keys(CATS).find(c => CATS[c].panels.includes(name)) || null;
 let currentPanel = 'look';
@@ -33,9 +33,9 @@ const lastPanel = {};           // per category: the pill you were on
 /* Display names. `cal` is the app's id everywhere it is an identity — the
    storage key, the namespace, Prefs.APPS, the settings panel — and DAY is only
    what it is called. Renaming the id would churn all four for a word. */
-const APP_NAMES = { do:'DO', log:'LOG', plan:'PLAN', store:'STORE', tend:'TEND', track:'TRACK', learn:'LEARN', cal:'DAY',
+const APP_NAMES = { today:'TODAY', gym:'GYM', do:'DO', log:'LOG', plan:'PLAN', store:'STORE', tend:'TEND', track:'TRACK', learn:'LEARN', cal:'DAY',
                     create:'CREATE', tools:'TOOLS' };
-const APP_HINTS = { do:'routines + packing', log:'daily log', plan:'todoist queue', store:'groceries',
+const APP_HINTS = { today:'the day, flexible', gym:'the A/B program', do:'routines + packing', log:'daily log', plan:'todoist queue', store:'groceries',
                     tend:'plant care', track:'CAP curriculum', learn:'anki decks', cal:'the planned day',
                     create:'songs and mixes', tools:'pomodoro + timers' };
 
@@ -53,7 +53,12 @@ const GROUPS = [
   { name:'LEARN', color:'#5ad4e6', match:k => k.startsWith('learn_') },
   { name:'CREATE',color:'#e6c34a', match:k => k.startsWith('create_') },
   { name:'TOOLS', color:'#5cdb7d', match:k => k.startsWith('tools_') },
-  { name:'ROOT',  color:'#e06f9a', match:k => k.startsWith('root_') },
+  { name:'TODAY', color:'#A78BFA', match:k => k.startsWith('today_') },
+  { name:'GYM',   color:'#b5e853', match:k => k.startsWith('gym_') },
+  /* qurOS's own shell keys, and root's — the two share an origin, so root's
+     are on this device too and the report should say whose they are */
+  { name:'qurOS', color:'#e06f9a', match:k => k.startsWith('quros_') },
+  { name:'ROOT',  color:'#8a8a8a', match:k => k.startsWith('root_') },
 ];
 
 const allKeys = () => { try { return Object.keys(localStorage); } catch { return []; } };
@@ -205,7 +210,7 @@ const sectionHead = (title, resetPath) =>
 
 function previewHTML() {
   return `<div class="preview">
-    <div class="pv-top"><div class="pv-logo">ROOT<em>.</em></div><div class="pv-tag">live preview</div></div>
+    <div class="pv-top"><div class="pv-logo">qurOS<em>.</em></div><div class="pv-tag">live preview</div></div>
     <div class="pv-bar"><i></i></div>
     <div class="pv-row">
       <div class="pv-card"><div class="pv-card-t">Morning</div><div class="pv-card-s">data + workout</div></div>
@@ -253,7 +258,7 @@ function lookHTML() {
     </div>
 
     ${mode === 'system' ? `
-      <div class="set-note">Pick the pair. ROOT switches between them when the device does.</div>
+      <div class="set-note">Pick the pair. qurOS switches between them when the device does.</div>
       <div class="opt-set"><label class="lbl">Dark half</label>
         <div class="chips">${Prefs.THEMES.filter(t => t.group === 'dark').map(t =>
           `<button class="chip${Prefs.get('themeDark') === t.id ? ' on' : ''}" data-pref="themeDark" data-val="${t.id}">${esc(t.name)}</button>`).join('')}</div></div>
@@ -683,7 +688,7 @@ function behaveHTML() {
       { v:'auto',   l:'on a touch screen' },
       { v:'always', l:'always' },
       { v:'off',    l:'never' },
-    ], 'In-app numpad', 'a field that only takes a number gets ROOT’s own pad instead of the system keyboard — sleep reads 720 as 7h20m, an alert hour reads 930 as 09:30')}
+    ], 'In-app numpad', 'a field that only takes a number gets the app’s own pad instead of the system keyboard — sleep reads 720 as 7h20m, an alert hour reads 930 as 09:30')}
 
     ${sectionHead('Safety')}
     ${toggle('confirmDestructive', 'Confirm before clearing', 'off makes reset and clear buttons act immediately')}
@@ -716,6 +721,143 @@ function behaveHTML() {
   `;
 }
 
+
+/* ── Keyed lists ──────────────────────────────────────────────────────────
+   One editor shape for every list whose rows carry a key the app files
+   things under: TODAY's chain, hygiene and prep, the pomodoro areas, STORE's
+   trips. The key is minted once and shown nowhere it could be edited; a row's
+   other fields are read back over the stored row, so a field this editor does
+   not draw is kept rather than dropped. */
+const DEEP = v => JSON.parse(JSON.stringify(v));
+function keyedEditor(o) {
+  const rows = () => { const v = Config.get(o.path); return Array.isArray(v) ? DEEP(v) : []; };
+  const field = (f, r) => {
+    const v = r[f.k];
+    if (f.kind === 'text')  return `<input type="text" data-field="${f.k}" value="${esc(v == null ? '' : v)}" maxlength="${f.max || 80}"
+                                     placeholder="${esc(f.ph || '')}" aria-label="${esc(f.label || f.k)}">`;
+    if (f.kind === 'color') return `<input type="color" class="ed-swatch" data-field="${f.k}" value="${esc(/^#[0-9a-f]{6}$/i.test(String(v)) ? v : '#8a8a8a')}" aria-label="colour">`;
+    if (f.kind === 'num')   return `<input type="number" inputmode="numeric" data-field="${f.k}" value="${esc(v == null ? '' : v)}"
+                                     min="${f.min ?? 0}" max="${f.max ?? 999}" step="1"${f.unit ? ` data-unit="${esc(f.unit)}"` : ''} aria-label="${esc(f.label)}">`;
+    if (f.kind === 'bool')  return `<button class="tog${v ? ' on' : ''}" data-field="${f.k}" data-toggle-cfg="1" role="switch"
+                                     aria-checked="${!!v}" aria-label="${esc(f.label)}"></button>`;
+    if (f.kind === 'link')  return `<select data-field="${f.k}" aria-label="${esc(f.label)}">${linkOptions(v)}</select>`;
+    if (f.kind === 'do')    return `<select data-field="${f.k}" aria-label="${esc(f.label)}">${doOptions(v)}</select>`;
+    return '';
+  };
+  return {
+    title: o.title, note: o.note,
+    render() {
+      const list = rows();
+      const heads = o.fields.filter(f => f.head), rest = o.fields.filter(f => !f.head);
+      return list.map((r, i) => `<div class="ed-card" data-key="${esc(r.key)}">
+          <div class="ed-head">${heads.map(f => field(f, r)).join('')}
+            <button class="ed-mv" data-ed="up:${i}" ${i ? '' : 'disabled'} aria-label="move up">↑</button>
+            <button class="ed-mv" data-ed="down:${i}" ${i < list.length - 1 ? '' : 'disabled'} aria-label="move down">↓</button>
+            <button class="ed-del" data-del="${esc(r.key)}" aria-label="delete">×</button>
+          </div>
+          ${rest.map(f => f.kind === 'bool'
+            ? `<div class="setting-row tight"><span class="setting-lbl">${esc(f.label)}</span>${field(f, r)}</div>`
+            : `<div class="f"><label class="lbl">${esc(f.label)}${f.unit ? `<em>${esc(f.unit)}</em>` : ''}</label>${field(f, r)}</div>`).join('')}
+        </div>`).join('') + `<button class="ed-add" data-add="1">${esc(o.addLabel || '+ add')}</button>`;
+    },
+    read(box) {
+      const src = rows(), out = [];
+      box.querySelectorAll('.ed-card[data-key]').forEach(card => {
+        const was = src.find(r => r.key === card.dataset.key) || { key: card.dataset.key };
+        const row = Object.assign({}, was);
+        o.fields.forEach(f => {
+          const el = card.querySelector(`[data-field="${f.k}"]`); if (!el) return;
+          if (f.kind === 'bool') row[f.k] = el.classList.contains('on');
+          else if (f.kind === 'num') { const n = parseFloat(el.value); row[f.k] = isFinite(n) ? Math.max(f.min ?? 0, Math.min(f.max ?? 999, n)) : 0; }
+          else if (f.kind === 'text') row[f.k] = el.value.trim().slice(0, f.max || 80);
+          else row[f.k] = el.value;
+          if (f.head && f.kind === 'text' && !row[f.k]) row[f.k] = was[f.k] || card.dataset.key;
+          if (['link', 'do', 'bool'].includes(f.kind) && !row[f.k]) delete row[f.k];
+        });
+        out.push(row);
+      });
+      Config.set(o.path, out);
+    },
+    act(spec) {
+      const [what, a] = String(spec).split(':');
+      const list = rows(), i = +a, j = what === 'up' ? i - 1 : i + 1;
+      if (!list[i] || !list[j]) return;
+      [list[i], list[j]] = [list[j], list[i]];
+      Config.set(o.path, list);
+    },
+    add() {
+      const list = rows(), b = o.blank();
+      list.push(Object.assign({ key: uniqueKey(b.label || 'row', list.map(r => r.key)).slice(0, 24) }, b));
+      Config.set(o.path, list);
+    },
+    del(key) { Config.set(o.path, rows().filter(r => r.key !== key)); },
+  };
+}
+/* Where a chain step can be ticked from besides a tap — the four kinds TODAY
+   understands, one focus-round link per pomodoro area TOOLS has now. A link
+   this build does not offer (one written by hand, `pom:cap:2`) is kept and
+   shown as itself rather than silently replaced. */
+function linkOptions(v) {
+  const areas = window.TOOLS && TOOLS.areas ? TOOLS.areas() : [];
+  const opts = [['', 'nothing — a tap only'], ['wake', 'the wake-up time'], ['gym', 'a GYM session'],
+                ['hygiene', 'the hygiene chain']].concat(areas.map(a => ['pom:' + a.key, 'a focus round · ' + a.label]));
+  if (v && !opts.some(o => o[0] === v)) opts.push([v, v]);
+  return opts.map(([k, l]) => `<option value="${esc(k)}"${(v || '') === k ? ' selected' : ''}>${esc(l)}</option>`).join('');
+}
+/* DO's routine items, for a mirror. A mirror naming an item DO no longer has
+   is shown as missing — it does nothing until the item is back or the link
+   is changed. */
+function doOptions(v) {
+  const items = window.DO && DO.routineItems ? DO.routineItems() : [];
+  const opts = [['', 'no']].concat(items.map(x => [x.routine + '|' + x.item, x.label + ' · ' + x.item]));
+  if (v && !opts.some(o => o[0] === v)) opts.push([v, v + ' (not on DO)']);
+  return opts.map(([k, l]) => `<option value="${esc(k)}"${(v || '') === k ? ' selected' : ''}>${esc(l)}</option>`).join('');
+}
+const gymDays = () => { const v = Config.get('gym.days'); return Array.isArray(v) ? DEEP(v) : []; };
+const recipesList = () => { const v = Config.get('store.recipes'); return Array.isArray(v) ? DEEP(v) : []; };
+/* An ingredient as one editable line, and back. */
+const FRACS = [[0.5, '½'], [0.25, '¼'], [0.75, '¾']];
+function qtyWord(q) {
+  if (q == null || !isFinite(+q)) return '';
+  const whole = Math.floor(+q), f = FRACS.find(([n]) => Math.abs((+q - whole) - n) < 0.01);
+  return f ? (whole ? whole : '') + f[1] : String(Math.round(+q * 100) / 100);
+}
+function ingLine(i) {
+  const flags = [i.opt ? 'optional' : '', i.pantry ? 'pantry' : '', i.choice ? 'choice: ' + i.choice : ''].filter(Boolean).join(', ');
+  const parts = [[qtyWord(i.q), i.u].filter(Boolean).join(' '), i.n, flags, i.note || ''];
+  while (parts.length > 2 && !parts[parts.length - 1]) parts.pop();
+  /* a bare name is just the name; anything with flags or a note keeps its
+     amount column, empty or not, so the line reads back the same way */
+  return parts.length === 2 && !parts[0] ? i.n : parts.join(' | ');
+}
+function parseIngLine(l) {
+  let parts = String(l).split('|').map(x => x.trim());
+  if (parts.length === 1) return parts[0] ? { n: parts[0].slice(0, 60) } : null;
+  /* "lime | optional" — a name, then flags, with the amount column left out
+     altogether: read it the way it was meant rather than as a unit called lime */
+  const FLAG = /^(optional|opt|pantry|choice\s*:.*)$/i;
+  if (parts[0] && !/[\d½¼¾]/.test(parts[0]) && FLAG.test(parts[1].split(',')[0].trim())) parts = [''].concat(parts);
+  const out = {};
+  const amt = /^(\d+(?:[.,]\d+)?)?\s*([½¼¾]|\d+\/\d+)?\s*(.*)$/.exec(parts[0]);
+  if (amt && (amt[1] || amt[2])) {
+    let q = amt[1] ? parseFloat(amt[1].replace(',', '.')) : 0;
+    if (amt[2]) q += amt[2] === '½' ? 0.5 : amt[2] === '¼' ? 0.25 : amt[2] === '¾' ? 0.75
+                    : (() => { const [x, y] = amt[2].split('/').map(Number); return y ? x / y : 0; })();
+    if (q > 0) out.q = Math.round(q * 1000) / 1000;
+    if (amt[3]) out.u = amt[3].slice(0, 16);
+  } else if (parts[0]) out.u = parts[0].slice(0, 16);
+  out.n = (parts[1] || '').slice(0, 60);
+  if (!out.n) return null;
+  const notes = [];
+  parts.slice(2).forEach(p => p.split(',').map(x => x.trim()).filter(Boolean).forEach(x => {
+    if (/^(optional|opt)$/i.test(x)) out.opt = true;
+    else if (/^pantry$/i.test(x)) out.pantry = true;
+    else if (/^choice\s*:/i.test(x)) out.choice = x.replace(/^choice\s*:\s*/i, '').slice(0, 30);
+    else notes.push(x);
+  }));
+  if (notes.length) out.note = notes.join(', ').slice(0, 120);
+  return out;
+}
 
 /* CONTENT
    Editors for everything Config holds. Each group declares how it renders and
@@ -1081,7 +1223,7 @@ const EDITORS = {
   /* PLAN · calendars */
   'plan.calendars': {
     title: 'Calendars',
-    note: 'Which Google Calendar each project\'s events belong on. ROOT never touches a calendar — it passes the name on in the export and the scheduled agent looks it up. One per line: the project, or "project > section" where a project splits, then a pipe, then the calendar name.',
+    note: 'Which Google Calendar each project\'s events belong on. The app never touches a calendar — it passes the name on in the export and the scheduled agent looks it up. One per line: the project, or "project > section" where a project splits, then a pipe, then the calendar name.',
     render() {
       const c = Config.get('plan.calendars') || {};
       return `<div class="f">
@@ -1656,6 +1798,231 @@ const EDITORS = {
     },
   },
 
+  /* TODAY · GYM · the pomodoro areas · STORE's recipes
+     The keyed lists below — the chain, the hygiene chain, the prep, the areas,
+     the trips — are one shape: a card per row, its key kept across a rename
+     (the day record files ticks under it), arrows to reorder (the chain's order
+     is its meaning), a delete and an add. `keyedEditor` builds that shape from
+     a list of fields, so five editors are one piece of code to keep right. */
+  'today.chain': keyedEditor({
+    path: 'today.chain', title: 'The morning chain',
+    note: 'In the order you do them. Each step has a full version and a minimum — logging the minimum is done, same tick. A link says where a step can also be ticked from: LOG’s wake time, a GYM session, the hygiene chain, or a focus round in one area. A DO tick, if set, mirrors the step onto DO’s card.',
+    fields: [ { k:'label', kind:'text', ph:'step', max:40, head:true },
+              { k:'full',  kind:'text', label:'Full', ph:'the whole thing', max:140 },
+              { k:'min',   kind:'text', label:'Minimum', ph:'the smallest version that counts', max:140 },
+              { k:'link',  kind:'link', label:'Linked to' },
+              { k:'do',    kind:'do',   label:'Also tick on DO' } ],
+    blank: () => ({ label:'new step', full:'', min:'', link:'' }),
+    addLabel: '+ add a step',
+  }),
+  'today.hygiene': keyedEditor({
+    path: 'today.hygiene', title: 'The hygiene chain',
+    note: 'The sequence that runs straight after the gym. The minimum steps are what "minimum" means for the chain step that links here; optional ones never count against "full". "Every" is how many days apart a step is usually done — it only changes a hint.',
+    fields: [ { k:'label', kind:'text', ph:'step', max:40, head:true },
+              { k:'min',      kind:'bool', label:'Part of the minimum' },
+              { k:'optional', kind:'bool', label:'Optional — not daily' },
+              { k:'every',    kind:'num',  label:'Usually every', unit:'days', min:0, max:30 },
+              { k:'do',       kind:'do',   label:'Also tick on DO' } ],
+    blank: () => ({ label:'new step' }),
+    addLabel: '+ add a step',
+  }),
+  'today.prep': keyedEditor({
+    path: 'today.prep', title: 'Ready for tomorrow',
+    note: 'The evening’s small checklist — what to leave by the door so the morning starts itself.',
+    fields: [ { k:'label', kind:'text', ph:'gym bag ready', max:60, head:true },
+              { k:'do',    kind:'do',   label:'Also tick on DO' } ],
+    blank: () => ({ label:'new item' }),
+    addLabel: '+ add an item',
+  }),
+
+  'gym.days': {
+    title: 'The program',
+    note: 'The days rotate in this order; GYM suggests whichever comes after the last full session. An exercise keeps its identity across a rename, so last time’s numbers and the "add weight" hint follow it — swap a machine by renaming it. Bodyweight movements have no weight field.',
+    render() {
+      const days = gymDays();
+      return days.map((d, di) => `<div class="ed-card ed-area" data-day="${esc(d.key)}">
+        <div class="ed-head">
+          <input type="text" data-field="label" value="${esc(d.label)}" maxlength="30" placeholder="day A" aria-label="day name">
+          <button class="ed-mv" data-ed="day-up:${di}" ${di ? '' : 'disabled'} aria-label="move day up">↑</button>
+          <button class="ed-mv" data-ed="day-down:${di}" ${di < days.length - 1 ? '' : 'disabled'} aria-label="move day down">↓</button>
+          <button class="ed-del" data-del="${esc(d.key)}" aria-label="delete day">×</button>
+        </div>
+        ${(d.exercises || []).map((e, ei) => `<div class="ed-ex" data-ex="${esc(e.key)}">
+          <div class="ed-head">
+            <input type="text" data-x="name" value="${esc(e.name)}" maxlength="60" placeholder="exercise" aria-label="exercise">
+            <button class="ed-mv" data-ed="ex-up:${di}:${ei}" ${ei ? '' : 'disabled'} aria-label="move up">↑</button>
+            <button class="ed-mv" data-ed="ex-down:${di}:${ei}" ${ei < d.exercises.length - 1 ? '' : 'disabled'} aria-label="move down">↓</button>
+            <button class="ed-del" data-ed="ex-del:${di}:${ei}" aria-label="remove exercise">×</button>
+          </div>
+          <div class="ed-quad">
+            <label><span>sets</span><input type="number" inputmode="numeric" min="1" max="10" data-x="sets" value="${esc(e.sets)}"></label>
+            <label><span>from</span><input type="number" inputmode="numeric" min="1" max="600" data-x="lo" value="${esc(e.lo)}"></label>
+            <label><span>to</span><input type="number" inputmode="numeric" min="1" max="600" data-x="hi" value="${esc(e.hi)}"></label>
+            <label><span>of</span><select data-x="unit"><option value="reps"${e.unit !== 's' ? ' selected' : ''}>reps</option><option value="s"${e.unit === 's' ? ' selected' : ''}>seconds</option></select></label>
+          </div>
+          <div class="setting-row tight"><span class="setting-lbl">Bodyweight</span>
+            <button class="tog${e.bw ? ' on' : ''}" data-x="bw" data-toggle-cfg="1" role="switch" aria-checked="${!!e.bw}" aria-label="bodyweight"></button></div>
+        </div>`).join('')}
+        <button class="ed-add" data-ed="ex-add:${di}">+ add an exercise to ${esc(d.label)}</button>
+      </div>`).join('') + `<button class="ed-add ed-add-area" data-add="1">+ add a day</button>`;
+    },
+    read(box) {
+      const src = gymDays();
+      const out = [];
+      box.querySelectorAll('.ed-card[data-day]').forEach(card => {
+        const was = src.find(d => d.key === card.dataset.day) || { key: card.dataset.day, exercises: [] };
+        const exercises = [];
+        card.querySelectorAll('.ed-ex').forEach(row => {
+          const x = f => row.querySelector(`[data-x="${f}"]`);
+          const n = (f, d) => { const v = parseFloat((x(f) || {}).value); return isFinite(v) ? v : d; };
+          const prev = (was.exercises || []).find(e => e.key === row.dataset.ex) || {};
+          const lo = Math.max(1, Math.round(n('lo', prev.lo || 8)));
+          exercises.push(Object.assign({}, prev, {
+            key: row.dataset.ex,
+            name: ((x('name') || {}).value || '').trim().slice(0, 60) || 'exercise',
+            sets: Math.max(1, Math.min(10, Math.round(n('sets', prev.sets || 3)))),
+            lo, hi: Math.max(lo, Math.round(n('hi', prev.hi || lo))),
+            unit: (x('unit') || {}).value === 's' ? 's' : 'reps',
+            bw: !!(x('bw') && x('bw').classList.contains('on')),
+          }));
+        });
+        out.push({ key: was.key, label: ((card.querySelector('[data-field=label]') || {}).value || '').trim().slice(0, 30) || 'day ' + was.key,
+                   exercises });
+      });
+      Config.set('gym.days', out);
+    },
+    act(spec) {
+      const [what, a, b] = String(spec).split(':');
+      const days = gymDays(), di = +a, ei = +b;
+      const swap = (arr, i, j) => { if (arr[i] && arr[j]) [arr[i], arr[j]] = [arr[j], arr[i]]; };
+      if (what === 'day-up')   swap(days, di, di - 1);
+      if (what === 'day-down') swap(days, di, di + 1);
+      if (!days[di] && what.startsWith('ex')) return;
+      if (what === 'ex-up')    swap(days[di].exercises, ei, ei - 1);
+      if (what === 'ex-down')  swap(days[di].exercises, ei, ei + 1);
+      if (what === 'ex-del')   days[di].exercises.splice(ei, 1);
+      if (what === 'ex-add') {
+        const taken = days.flatMap(d => d.exercises.map(e => e.key));
+        days[di].exercises.push({ key: uniqueKey('exercise', taken), name: 'new exercise', sets: 3, lo: 8, hi: 12, unit: 'reps' });
+      }
+      Config.set('gym.days', days);
+    },
+    add() {
+      const days = gymDays();
+      const taken = days.map(d => d.key);
+      const letter = 'ABCDEFG'.split('').find(c => !taken.includes(c)) || uniqueKey('day', taken);
+      days.push({ key: letter, label: 'day ' + letter, exercises: [] });
+      Config.set('gym.days', days);
+    },
+    del(key) {
+      const days = gymDays();
+      if (days.length <= 1) { Shell.toast('one day has to stay'); return; }
+      Config.set('gym.days', days.filter(d => d.key !== key));
+    },
+  },
+
+  'tools.areas': keyedEditor({
+    path: 'tools.areas', title: 'Focus areas',
+    note: 'What a focus round is for. Each finished round is filed under the area picked when it ends, which is what "2 CAP · 1 music today" and the week’s split count. A renamed area keeps its count.',
+    fields: [ { k:'label', kind:'text', ph:'CAP', max:24, head:true },
+              { k:'color', kind:'color', head:true } ],
+    blank: () => ({ label:'area', color:'#8a8a8a' }),
+    addLabel: '+ add an area',
+  }),
+
+  'store.recipes': {
+    title: 'Recipes',
+    note: 'One ingredient a line: <b>amount | name | flags | note</b>, where the amount is optional ("300 g", "½", "2 cloves") and the flags are <b>optional</b>, <b>pantry</b> or <b>choice: meat</b> (pick one of the group). One step a line: <b>text | minutes</b> for a step with a timer. A count with no unit goes into the grocery title ("onion x2"); anything with a unit goes in the note.',
+    render() {
+      const list = recipesList();
+      return list.map((r, i) => `<div class="ed-card" data-key="${esc(r.key)}">
+        <div class="ed-head">
+          <input type="text" data-field="name" value="${esc(r.name)}" maxlength="80" placeholder="recipe" aria-label="recipe name">
+          <button class="ed-mv" data-ed="up:${i}" ${i ? '' : 'disabled'} aria-label="move up">↑</button>
+          <button class="ed-mv" data-ed="down:${i}" ${i < list.length - 1 ? '' : 'disabled'} aria-label="move down">↓</button>
+          <button class="ed-del" data-del="${esc(r.key)}" aria-label="delete recipe">×</button>
+        </div>
+        <div class="ed-pair">
+          <div class="f"><label class="lbl">Serves</label><input type="number" inputmode="numeric" min="1" max="24" data-field="serves" value="${esc(r.serves || 2)}"></div>
+          <div class="f"><label class="lbl">Usually cooked at</label><select data-field="usual">${[0.5, 1, 2, 3].map(s =>
+            `<option value="${s}"${(+r.usual || 1) === s ? ' selected' : ''}>×${s === 0.5 ? '½' : s}</option>`).join('')}</select></div>
+        </div>
+        <div class="f"><label class="lbl">Note</label><input type="text" data-field="note" value="${esc(r.note || '')}" maxlength="240"></div>
+        <div class="f"><label class="lbl">Ingredients</label>
+          <textarea data-field="ing" rows="${Math.min(16, Math.max(4, (r.ing || []).length + 1))}" spellcheck="false">${esc((r.ing || []).map(ingLine).join('\n'))}</textarea></div>
+        <div class="f"><label class="lbl">Steps</label>
+          <textarea data-field="steps" rows="${Math.min(12, Math.max(3, (r.steps || []).length + 1))}" spellcheck="false">${esc((r.steps || []).map(s => s.m ? `${s.t} | ${s.m}` : s.t).join('\n'))}</textarea></div>
+        <div class="f"><label class="lbl">Sides<em>label: recipe-key, recipe-key — e.g. rice: rice_red, rice_lime</em></label>
+          <input type="text" data-field="sides" value="${esc((r.sides || []).map(s => `${s.label}: ${(s.options || []).join(', ')}`).join('; '))}" spellcheck="false"></div>
+        <div class="ed-hint">key <b>${esc(r.key)}</b> — what a side names this recipe by</div>
+      </div>`).join('') + `<button class="ed-add" data-add="1">+ add a recipe</button>`;
+    },
+    read(box) {
+      const src = recipesList(), out = [];
+      box.querySelectorAll('.ed-card[data-key]').forEach(card => {
+        const v = f => (card.querySelector(`[data-field="${f}"]`) || {}).value || '';
+        const was = src.find(r => r.key === card.dataset.key) || {};
+        out.push(Object.assign({}, was, {
+          key: card.dataset.key,
+          name: v('name').trim().slice(0, 80) || 'recipe',
+          serves: Math.max(1, Math.min(24, Math.round(parseFloat(v('serves'))) || 2)),
+          usual: [0.5, 1, 2, 3].includes(parseFloat(v('usual'))) ? parseFloat(v('usual')) : 1,
+          note: v('note').trim().slice(0, 240),
+          ing: lines(v('ing')).map(parseIngLine).filter(Boolean).slice(0, 60),
+          steps: lines(v('steps')).map(l => { const p = l.lastIndexOf('|'); const m = p > 0 ? parseFloat(l.slice(p + 1)) : NaN;
+            return isFinite(m) && m > 0 ? { t: l.slice(0, p).trim(), m } : { t: l }; }).slice(0, 40),
+          sides: v('sides').split(';').map(x => x.trim()).filter(Boolean).map(x => {
+            const c = x.indexOf(':');
+            return c < 0 ? null : { label: x.slice(0, c).trim() || 'side', options: x.slice(c + 1).split(',').map(o => slug(o.trim())).filter(o => o !== 'x') };
+          }).filter(s => s && s.options.length).slice(0, 3),
+        }));
+      });
+      Config.set('store.recipes', out);
+    },
+    act(spec) {
+      const [what, a] = String(spec).split(':');
+      const list = recipesList(), i = +a, j = what === 'up' ? i - 1 : i + 1;
+      if (!list[i] || !list[j]) return;
+      [list[i], list[j]] = [list[j], list[i]];
+      Config.set('store.recipes', list);
+    },
+    add() {
+      const list = recipesList();
+      list.push({ key: uniqueKey('recipe', list.map(r => r.key)), name: 'new recipe', serves: 2, ing: [], steps: [] });
+      Config.set('store.recipes', list);
+    },
+    del(key) { Config.set('store.recipes', recipesList().filter(r => r.key !== key)); },
+  },
+  'store.synonyms': {
+    title: 'Same thing, different names',
+    note: 'One group a line, comma separated; the first name is the one kept. "Add to groceries" treats every name in a group as one item, so "bicarb soda" never lands on a list that already has "baking soda". Quantities and plurals are taken off before matching.',
+    render() {
+      const groups = Config.get('store.synonyms') || [];
+      return `<textarea data-field="groups" rows="${Math.min(16, Math.max(4, groups.length + 1))}" spellcheck="false"
+        placeholder="baking soda, bicarb soda">${esc(groups.map(g => (Array.isArray(g) ? g : [g]).join(', ')).join('\n'))}</textarea>`;
+    },
+    read(box) {
+      const ta = box.querySelector('[data-field=groups]'); if (!ta) return;
+      Config.set('store.synonyms', lines(ta.value).map(l => l.split(',').map(x => x.trim()).filter(Boolean)).filter(g => g.length > 1));
+    },
+  },
+  'store.pantry': {
+    title: 'Always in the cupboard',
+    note: 'Left off a meal’s groceries unless switched in on the recipe. One a line.',
+    render() {
+      return `<textarea data-cfg="store.pantry" data-lines="1" rows="4" spellcheck="false" placeholder="herbes de provence">${
+        esc((Config.get('store.pantry') || []).join('\n'))}</textarea>`;
+    },
+    read() {},
+  },
+  'store.trips': keyedEditor({
+    path: 'store.trips', title: 'Grocery trips',
+    note: 'The kinds of trip a recipe’s groceries can go on. Each is a parent task in the STORE section, named "<label> — <day>" with that day as its due date; the items hang under it. STORE’s own sync never pulls a trip in as something to buy.',
+    fields: [ { k:'label', kind:'text', ph:'walk shop', max:30, head:true } ],
+    blank: () => ({ label:'big shop' }),
+    addLabel: '+ add a kind of trip',
+  }),
+
   'cal.eventColors': {
     title: 'Event colours',
     note: 'The template hours around your blocks, coloured by the calendar they sit on. One per line: the calendar name, a pipe, then a hex colour. The line "*" is the fallback for a calendar this list has never heard of. A task keeps its own project\'s colour and is not set here.',
@@ -1678,11 +2045,12 @@ const EDITORS = {
   },
 };
 
-const EDITOR_ORDER = ['do.routines','do.mediaLabels','do.travelCategories','log.blocks','log.labels','log.fields',
+const EDITOR_ORDER = ['today.chain','today.hygiene','today.prep','gym.days','do.routines','do.mediaLabels','do.travelCategories','log.blocks','log.labels','log.fields',
                       'plan.types','plan.chips','plan.formFields','plan.presets','plan.calendars','plan.dayTemplates',
+                      'store.recipes','store.synonyms','store.pantry','store.trips',
                       'store.categories','store.meals','store.quickAmounts',
                       'tend.groups','tend.labels','track.labels','learn.ratings','cal.eventColors',
-                      'create.areas','tools.wimhof','tools.optimise'];
+                      'create.areas','tools.areas','tools.wimhof','tools.optimise'];
 
 /* OPTIMISE's lists, read as a fresh array every time. The editor writes the
    whole branch on every change, so it must never hand Config a reference to
@@ -1721,7 +2089,7 @@ function renderContent(app) {
       <div class="sec"><span>Content</span></div>
       <div class="set-note">What ${esc(APP_NAMES[a] || a)} used to have baked into its
         code. Edits save as you type and take effect at once. Each section can be
-        put back to what ROOT ships with on its own.</div>` + paths.map(editorHTML).join('');
+        put back to what qurOS ships with on its own.</div>` + paths.map(editorHTML).join('');
   });
 }
 
@@ -2098,11 +2466,13 @@ async function exportAll() {
   if (!keys.length) { Shell.toast('nothing stored yet'); return; }
   const data = {};
   keys.forEach(k => { data[k] = localStorage.getItem(k); });
+  /* `app:'root'` is the format's name, not the brand: a qurOS backup restores
+     into root and a root backup into qurOS, because the keys are the same. */
   const payload = { app:'root', version:2, exported:new Date().toISOString(), data };
   const json = JSON.stringify(payload);
   const d = new Date();
   const stamp = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  const filename = `root_backup_${stamp}.json`;
+  const filename = `quros_backup_${stamp}.json`;
   try {
     const file = new File([json], filename, { type:'application/json' });
     if (navigator.canShare?.({ files:[file] })) { await navigator.share({ files:[file] }); return; }
@@ -2125,7 +2495,7 @@ function importAll(event) {
     let payload;
     try { payload = JSON.parse(reader.result); } catch { Shell.toast('invalid file'); return; }
     const data = payload && typeof payload.data === 'object' ? payload.data : null;
-    if (!data) { Shell.toast('not a root backup'); return; }
+    if (!data) { Shell.toast('not a backup file'); return; }
     const incoming = Object.keys(data);
     if (!incoming.length) { Shell.toast('nothing in that file'); return; }
     const existing = new Set(allKeys());
@@ -2157,7 +2527,7 @@ async function exportLook() {
   catch {}
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([json], { type:'application/json' }));
-  a.download = 'root_look.json'; a.click();
+  a.download = 'quros_look.json'; a.click();
 }
 
 async function importLook() {
@@ -2165,13 +2535,13 @@ async function importLook() {
   try { text = await navigator.clipboard.readText(); } catch {}
   if (text.trim()) { applyLook(text); return; }
   // no clipboard permission (or nothing in it): ask for it in the app's own field
-  Shell.prompt('Paste a ROOT look', '', v => applyLook(v));
+  Shell.prompt('Paste a look', '', v => applyLook(v));
 }
 function applyLook(text) {
   if (!String(text || '').trim()) return;
   let p;
   try { p = JSON.parse(text); } catch { Shell.toast('that is not valid JSON'); return; }
-  if (!p || p.app !== 'root') { Shell.toast('not a root look'); return; }
+  if (!p || p.app !== 'root') { Shell.toast('not a look'); return; }
   if (p.prefs)  Prefs.setMany(p.prefs);
   if (p.config) Config.replaceAll(p.config);
   render();
@@ -2276,6 +2646,8 @@ function dropIndex() { indexCache = null; }
 
 const RENDERERS = {
   look: renderLook, layout: renderLayout, behave: renderBehave, data: renderData, sync: renderSync,
+  today:() => { window.TODAY && TODAY.renderSettings(); renderContent('today'); },
+  gym:  () => { window.GYM   && GYM.renderSettings();   renderContent('gym'); },
   do:   () => { window.DO   && DO.renderSettings();    renderContent('do'); },
   log:  () => { window.LOG  && LOG.renderDataScreen(); renderContent('log'); },
   plan: () => { window.PLAN && PLAN.renderSettings();  renderContent('plan'); },
@@ -2634,7 +3006,7 @@ view.addEventListener('click', e => {
   }
   if (t.dataset.cfgReset) {
     const paths = RESET_BUNDLE[t.dataset.cfgReset] || [t.dataset.cfgReset];
-    confirmed('Put this section back to what ROOT ships with?', () => {
+    confirmed('Put this section back to what qurOS ships with?', () => {
       paths.forEach(p => Config.reset(p));
       renderContent(); Shell.toast('reset to default');
     });
@@ -2675,13 +3047,14 @@ view.addEventListener('click', e => {
        'soundKit','sndTap','sndNav','sndMenu','sndDone','sndMsg',
        'confirmDestructive','numpad',
        'toastMs','undoSec','undoIcon','undoText','keyboardNav','keyMap','kbMark','lockPortrait','syncTodayPrivate',
+       'todayChain','todayWeek','todayFocus','todayDumpRow','gymAutoRest',
        'dateFormat','weekStart','currency'].forEach(k => Prefs.reset(k));
       render(); Shell.toast('behaviour reset');
     });
   }
   if (t.dataset.act === 'reset-content') {
     Shell.ask({ title: 'Discard every content edit?',
-                body: 'Everything goes back to what ROOT ships with. Your logged days, lists and history are untouched.',
+                body: 'Everything goes back to what qurOS ships with. Your logged days, lists and history are untouched.',
                 yes: 'discard', danger: true,
                 done: a => { if (!a) return; Config.resetAll(); renderData(); Shell.toast('content reset'); } });
   }

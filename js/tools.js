@@ -93,7 +93,7 @@ function normHex(v) {
 }
 
 /* Content */
-let POM, WHF, LISTS;
+let POM, WHF, LISTS, AREAS;
 function readConfig() {
   POM = Object.assign({ focus:25, short:5, long:15, rounds:4, autoStart:false, label:'focus' },
                       Config.get('tools.pomodoro') || {});
@@ -126,6 +126,16 @@ function readConfig() {
     steps:     (Array.isArray(l && l.steps) ? l.steps : [])
                  .map(s => String(s || '').trim()).filter(Boolean).slice(0, 24),
   })).filter(l => l.id).slice(0, 24);
+
+  /* What a focus round is for. A key is an identity — the log is filed under
+     it — so a renamed area keeps its count; an unknown or missing key is a
+     round with no area, which still counts towards the day's total. */
+  const seen = new Set();
+  AREAS = (Array.isArray(Config.get('tools.areas')) ? Config.get('tools.areas') : [])
+    .filter(a => a && typeof a === 'object' && /^[a-z0-9_-]{1,24}$/.test(String(a.key || '')))
+    .filter(a => !seen.has(a.key) && seen.add(a.key))
+    .map((a, i) => ({ key: a.key, label: String(a.label || a.key).slice(0, 24),
+                      color: normHex(a.color) || PALETTE[i % PALETTE.length] })).slice(0, 12);
 }
 
 /* A list's colour, resolved. `accent` and `gradient` take the app's own accent
@@ -148,12 +158,12 @@ const blank = () => ({
   v: 3,
   tool: 'pom',
   /* `days` is the day's finished focus *count* and stays a number: it is what
-     LOG's note reads, and ROOT.md §5 does not reshape a contract for a
+     LOG's note reads, and QUROS.md §5 does not reshape a contract for a
      feature. `log` is the history beside it — the rows the tool now draws.
      `dial` is where the on-tool sliders sit, and null means "whatever settings
      says", so a default changed in settings still reaches a tool nobody has
      touched the sliders on. */
-  pom:   { phase:'focus', round:1, endsAt:0, left:0, days:{}, log:{}, dial:null },
+  pom:   { phase:'focus', round:1, endsAt:0, left:0, days:{}, log:{}, dial:null, area:'' },
   /* The breathing round. `phase` is idle until a session starts; `startedAt`
      is when the current phase began, which is what the hold counts up from.
      `holds` collects this session's retention times, and `days` keeps the
@@ -176,7 +186,7 @@ function load() {
   DB = normalise(s);
 }
 /* Rebuilt from its known keys, never trusted. The curate cache in CREATE
-   earned this rule the hard way (ROOT.md §6): one undefined array out of a
+   earned this rule the hard way (QUROS.md §6): one undefined array out of a
    store nobody validated took out a whole tab.
 
    A v1 record carries `sw`, `timer` and `decide` for instruments that no
@@ -194,7 +204,11 @@ function normalise(s) {
     endsAt: Math.max(0, +p.endsAt || 0),
     left:   Math.max(0, +p.left || 0),
     days: (p.days && typeof p.days === 'object') ? p.days : {},
-    log:  dayLists(p.log, r => ({ at: String(r.at || ''), mins: Math.max(0, +r.mins || 0) })),
+    log:  dayLists(p.log, r => ({ at: String(r.at || ''), mins: Math.max(0, +r.mins || 0),
+                                  area: /^[a-z0-9_-]{1,24}$/.test(String(r.area || '')) ? String(r.area) : '' })),
+    /* the area the next finished round is filed under — kept as a plain key
+       and checked when read, so an area deleted since falls back to the first */
+    area: /^[a-z0-9_-]{1,24}$/.test(String(p.area || '')) ? String(p.area) : '',
     dial: p.dial && typeof p.dial === 'object' ? {
       focus:  clampDial(DIAL.pomFocus,  p.dial.focus,  null),
       brk:    clampDial(DIAL.pomBreak,  p.dial.brk,    null),
@@ -392,7 +406,7 @@ function pomAdvance(finished) {
       const floor = Object.keys(p.days).sort().slice(-90);
       p.days = floor.reduce((o, d) => { o[d] = p.days[d]; return o; }, {});
       /* And the row beside it, which is what the history draws. */
-      p.log[k] = (p.log[k] || []).concat([{ at: hhmmNow(), mins: pomFocus() }]).slice(-40);
+      p.log[k] = (p.log[k] || []).concat([{ at: hhmmNow(), mins: pomFocus(), area: pomArea() }]).slice(-40);
       p.log = floorDays(p.log);
       writeDown(POM.label);
     }
@@ -407,6 +421,53 @@ function pomAdvance(finished) {
 }
 function pomSkip() { pomAdvance(false); render(); toast(pomPhase().label); }
 
+/* Areas
+   The area a round is filed under is the one picked when it *finishes*, not
+   when it started: retagging a running round is just changing your mind about
+   what it was for, and it costs nothing to allow. */
+const pomArea = () => (AREAS.some(a => a.key === DB.pom.area) ? DB.pom.area : (AREAS[0] ? AREAS[0].key : ''));
+const areaOf  = k => AREAS.find(a => a.key === k) || null;
+const areaCount = (iso, key) => (DB.pom.log[iso] || []).filter(r => r.area === key).length;
+function setArea(key) {
+  if (!areaOf(key)) return;
+  DB.pom.area = key; save(); render();
+}
+/* A focus round started from somewhere else — TODAY's next step, its focus
+   card. A break in progress gives way: asking for focus is asking for focus. */
+function startFocus(area) {
+  if (area && areaOf(area)) DB.pom.area = area;
+  if (DB.pom.phase !== 'focus') pomAdvance(false);
+  if (!pomRunning()) pomStart(); else { save(); render(); }
+}
+function areaChipsHTML() {
+  if (!AREAS.length) return '';
+  const cur = pomArea();
+  return `<div class="tl-areas" role="group" aria-label="what this round is for">${AREAS.map(a => {
+    const n = areaCount(today(), a.key);
+    return `<button class="tl-area${a.key === cur ? ' on' : ''}" data-act="pom-area" data-a="${esc(a.key)}"
+      style="--ar:${esc(a.color)}" aria-pressed="${a.key === cur}"><span>${esc(a.label)}</span>${n ? `<b>${n}</b>` : ''}</button>`;
+  }).join('')}</div>`;
+}
+
+/* ' · CAP 2 · music 1' over a set of days, or nothing when no round in them
+   carried an area. */
+function areaSplit(days) {
+  const parts = AREAS.map(a => [a.label, days.reduce((t, k) => t + areaCount(k, a.key), 0)]).filter(x => x[1]);
+  return parts.length ? ' · ' + parts.map(([l, n]) => esc(l) + ' ' + n).join(' · ') : '';
+}
+/* The week so far, by area — a count, never a streak. */
+function weekSplitHTML() {
+  const days = lastDays(7).filter(k => k >= weekStart());
+  const n = days.reduce((t, k) => t + (DB.pom.log[k] || []).length, 0);
+  return n ? `<div class="tl-week">this week <b>${n}</b>${areaSplit(days)}</div>` : '';
+}
+function weekStart() {
+  const d = new Date(today() + 'T12:00:00');
+  const start = (window.Prefs && Prefs.get('weekStart') === 'sun') ? 0 : 1;
+  const back = (d.getDay() - start + 7) % 7;
+  return lastDays(back + 1)[0];
+}
+
 /* The breathing round
    Three phases per round, and only two of them have a length:
 
@@ -419,7 +480,7 @@ function pomSkip() { pomAdvance(false); render(); toast(pomPhase().label); }
      recover   `recovery` seconds after the big inhale, counting down.
 
    The method is Wim Hof's; since 4.12 the instrument is called what it is. The
-   storage path is still `wimhof` — ROOT.md §5 does not rename one for a word. */
+   storage path is still `wimhof` — QUROS.md §5 does not rename one for a word. */
 const whfRounds = () => (DB.whf.dial && DB.whf.dial.rounds   != null) ? DB.whf.dial.rounds   : WHF.rounds;
 const whfPace   = () => (DB.whf.dial && DB.whf.dial.pace     != null) ? DB.whf.dial.pace     : WHF.pace;
 const whfRecov  = () => (DB.whf.dial && DB.whf.dial.recovery != null) ? DB.whf.dial.recovery : WHF.recovery;
@@ -669,7 +730,7 @@ function tool() {
 }
 
 /* The strip, the glider and the scroll-into-view are CREATE's, line for line —
-   ROOT.md §6 names the pair, because a third copy of a shape is a third thing
+   QUROS.md §6 names the pair, because a third copy of a shape is a third thing
    to keep in step. */
 function renderTabs() {
   const bar = $id('tl-tabs'); if (!bar) return;
@@ -846,7 +907,9 @@ function pomHTML() {
   const done = pomToday();
   const running = pomRunning();
   const d = DB.pom.dial || {};
-  return ringHTML(left / total, ph.cls + (running ? ' live' : ''), clock(left), ph.label,
+  const area = areaOf(pomArea());
+  return areaChipsHTML() + ringHTML(left / total, ph.cls + (running ? ' live' : ''), clock(left),
+                  ph.label + (DB.pom.phase === 'focus' && area ? ' · ' + area.label : ''),
                   pipsHTML(DB.pom.round - 1, pomRounds(), 'focus')) + `
     <div class="tl-main">
       ${bigBtn('pom-toggle', running ? 'pause' : 'start', running ? PAUSE : PLAY, running ? 'on' : '')}
@@ -862,8 +925,8 @@ function pomHTML() {
       </button>
     </div>
     <div class="tl-tally">${done
-      ? `<b>${done}</b> focus round${done === 1 ? '' : 's'} today`
-      : 'nothing finished yet today'}</div>
+      ? `<b>${done}</b> focus round${done === 1 ? '' : 's'} today${areaSplit([today()])}`
+      : 'nothing finished yet today'}${weekSplitHTML()}</div>
     ${dialsHTML(dialsOpen,
       dialHTML('pom-focus',  DIAL.pomFocus,  'focus',  pomFocus(),  d.focus  == null) +
       dialHTML('pom-brk',    DIAL.pomBreak,  'break',  pomBreak(),  d.brk    == null) +
@@ -975,9 +1038,9 @@ function pomHistoryHTML() {
     const good = rows.length === best && best > 1;
     return `<div class="tl-row${good ? ' good' : ''}">
       <span class="rw-day">${esc(dayWord(k))}</span>
-      <span class="rw-bars">${rows.map(r =>
-        `<i style="--w:${Math.max(2, Math.min(1, (+r.mins || 25) / 60) * 100)}%"
-            title="${esc(r.at)}"></i>`).join('')}</span>
+      <span class="rw-bars">${rows.map(r => { const a = areaOf(r.area);
+        return `<i style="--w:${Math.max(2, Math.min(1, (+r.mins || 25) / 60) * 100)}%${a ? ';--ar:' + esc(a.color) : ''}"
+            title="${esc(r.at)}${a ? ' · ' + esc(a.label) : ''}"></i>`; }).join('')}</span>
       <span class="rw-n">${esc(rows.length)}<em>${esc(Math.round(mins))}m</em></span>
     </div>`;
   }).join('');
@@ -1143,7 +1206,7 @@ function optHistHTML() {
    Every series is read through the owning app's own read-only day reader —
    `LOG.dayData`, `TRACK.doneOn`, `LEARN.dailyStats`, `CREATE.dayStats`,
    `CAL.marks`, `TEND.careOn`, `STORE.tripsOn` — never out of its storage key.
-   That is the rule ROOT.md §6 already states for LOG's note, and it is what
+   That is the rule QUROS.md §6 already states for LOG's note, and it is what
    keeps this from becoming a second definition of every record in the app: an
    app that is switched off, or a reader that is not there, simply contributes
    nothing and the chart carries on.
@@ -1596,6 +1659,7 @@ document.addEventListener('click', ev => {
   if (act === 'pom-toggle')  { pomRunning() ? pomPause() : pomStart(); return; }
   if (act === 'pom-skip')    { pomSkip(); return; }
   if (act === 'pom-reset')   { pomReset(); return; }
+  if (act === 'pom-area')    { setArea(t.dataset.a); return; }
   if (act === 'whf-start')   { whfStart(); return; }
   if (act === 'whf-hold')    { whfToHold(); return; }
   if (act === 'whf-breathe') { whfEndHold(); return; }
@@ -1810,6 +1874,23 @@ return { render, renderSettings, renderStrip, resetAll,
            return { rounds: pomToday(), minutes: pomToday() * pomFocus(),
                     sessions: s.length,
                     best: s.reduce((m, x) => Math.max(m, +x.best || 0), 0),
-                    runs: r.length };
-         } };
+                    runs: r.length,
+                    areas: AREAS.map(a => ({ key: a.key, label: a.label, n: areaCount(today(), a.key) })) };
+         },
+         /* The pomodoro, for TODAY: what areas there are, how many rounds each
+            had on a day, what the clock is doing now, and the three things its
+            focus card can ask for. TODAY never writes TOOLS' store — these do. */
+         areas: () => AREAS.map(a => Object.assign({}, a)),
+         areaCount: (iso, key) => areaCount(iso, key),
+         focusMins: () => pomFocus(),
+         pomNow: () => {
+           const a = areaOf(pomArea());
+           return { running: pomRunning(), left: pomLeft() || pomTotal(), total: pomTotal(),
+                    phase: DB.pom.phase, phaseLabel: pomPhase().label, round: DB.pom.round,
+                    area: pomArea(), areaLabel: a ? a.label : '' };
+         },
+         startFocus, setArea,
+         togglePom: () => { pomRunning() ? pomPause() : pomStart(); },
+         /* open on one instrument — TODAY's focus card lands on the pomodoro */
+         show: k => { if (TOOL_KEYS.includes(k)) { DB.tool = k; save(); render(); } } };
 })();

@@ -49,7 +49,7 @@ test('session diff finds edits, additions and deletions without Git or dependenc
 test('validation expands for executable or uncertain changes and allows explicit full checks', () => {
   assert.equal(chooseChecks([]), 'none');
   assert.equal(chooseChecks([], 'full'), 'full');
-  assert.equal(chooseChecks(['ROOT.md']), 'docs');
+  assert.equal(chooseChecks(['QUROS.md']), 'docs');
   assert.equal(chooseChecks(['css/tools.css', 'favicon.png']), 'quick');
   for (const file of ['js/tools.js', 'index.html', 'css/tokens.css', 'css/themes.css', 'css/shell.css', 'manifest.webmanifest', 'test/package.json', '.gitignore']) {
     assert.equal(chooseChecks([file]), 'full');

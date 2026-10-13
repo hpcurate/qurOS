@@ -35,7 +35,7 @@
    pixels, which meant the Spacing dial moved every pad on the page and left
    the gaps *between* the sections exactly where they were — the screen got
    denser and looser at the same time, which is what "the spacing is off" looks
-   like. Every number in this sheet is a ratio of --dens now (ROOT.md §4). */
+   like. Every number in this sheet is a ratio of --dens now (QUROS.md §4). */
 .ns-create .cr-sec{font:400 9px/1 var(--mono);letter-spacing:2px;color:var(--mu);text-transform:var(--caps);
   margin:calc(26px * var(--dens)) 0 calc(10px * var(--dens));
   display:flex;justify-content:space-between;align-items:baseline;gap:calc(10px * var(--dens))}

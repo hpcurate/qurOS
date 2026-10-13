@@ -154,7 +154,10 @@ window.Shell = (function () {
      so the reference handed out below stays live. */
   const APPS = (window.Prefs && Prefs.APPS) || ['do', 'log', 'plan', 'store', 'tend', 'track', 'learn'];
   const TABS = [];
-  const TAB_KEY = 'root_tab';          // last tab, so a reload lands where you left
+  /* Last tab, so a reload lands where you left. qurOS's own, not root's
+     `root_tab`: the two share an origin, and a tab name one of them has and
+     the other does not is a tab the other cannot land on. */
+  const TAB_KEY = 'quros_tab';
 
   const track    = document.getElementById('track');
   const viewport = document.getElementById('views');
@@ -591,6 +594,10 @@ window.Shell = (function () {
     // on an app opened from settings, the settings button wears that app's
     // icon and lights up — tapping it still goes to the settings home
     const onT = !!transient && TABS[index] === transient;
+    /* Past eight tabs a phone-wide pill cannot hold a label under every icon —
+       eleven of them printed over each other. The live tab keeps its label and
+       is given the room for it; the rest are their icons (shell.css). */
+    navEl.dataset.crowd = TABS.length > 8 ? 'on' : 'off';
     TABS.forEach((n, i) => {
       const b = btnOf(n); if (!b) return;
       const on = i === index || (n === 'settings' && onT);

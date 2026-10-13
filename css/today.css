@@ -1,0 +1,314 @@
+/* TODAY — the flex system. The next action is the one big thing on the screen;
+   everything else is secondary and quieter. Nothing here is ever red: an empty
+   cell is empty, a skipped step is grey, a bad day only goes quieter. Every
+   length goes through the shared tokens (QUROS.md §4). */
+
+.ns-today .scr{display:none;min-height:100%;padding-bottom:var(--scr-pad-b)}
+.ns-today .scr.on{display:block}
+
+/* sticky sub-screen header — the same shape every app's has */
+.ns-today .hd{position:sticky;top:0;background:var(--bg);border-bottom:var(--bw) solid var(--bd);
+  padding:calc(var(--hd-pad) + var(--sat)) 18px var(--hd-pad);
+  display:flex;align-items:center;gap:calc(14px * var(--dens));z-index:10}
+.ns-today .hd-back{background:none;border:none;color:var(--y);font:400 12px/1 var(--mono);cursor:pointer;
+  letter-spacing:.06em;padding:calc(4px * var(--dens)) 0}
+.ns-today .hd-title{font:800 var(--hd-title-px)/1 var(--head);letter-spacing:.1em;text-transform:var(--caps);
+  text-shadow:var(--title-sh-x) 0 0 var(--title-sh-c);flex:1}
+
+/* the band: its box is shell.css's; type and the corner switch are TODAY's */
+.ns-today .h-label{font:700 10px/1 var(--head);letter-spacing:.16em;text-transform:var(--caps);color:var(--tx-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ns-today .h-label .h-count{color:var(--y);margin-left:10px}
+.ns-today .h-logo{font-weight:800;font-family:var(--head);letter-spacing:-.02em}
+.ns-today .h-logo em{font-style:normal}
+.ns-today .h-logo-row{display:flex;align-items:center;justify-content:space-between;gap:calc(14px * var(--dens))}
+.ns-today .h-acts{display:flex;align-items:center}
+.ns-today .td-bad{background:none;border:var(--bw) solid var(--bd-2);border-radius:var(--r-pill);
+  color:var(--tx-2);font:400 10.5px/1 var(--mono);letter-spacing:.06em;cursor:pointer;
+  padding:calc(6px * var(--dens)) calc(10px * var(--dens));transition:background var(--dur-2),color var(--dur-2)}
+.ns-today .td-bad::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:7px;
+  vertical-align:1px;background:var(--mu);transition:background var(--dur-2)}
+.ns-today .td-bad.on{background:var(--s2);color:var(--tx);border-color:var(--tx-2)}
+.ns-today .td-bad.on::before{background:var(--tx)}
+/* A bad day goes quieter, never redder: the accent drifts towards grey. The
+   three washes are restated beside it because a custom property is resolved
+   where it is declared — the ones on :root were baked from the root's accent
+   and would not follow this one (QUROS.md §6). */
+.ns-today.ty-is-bad{--y:color-mix(in srgb, var(--tab-today, #A78BFA) 55%, var(--tx-2));
+  --yd:color-mix(in srgb, var(--y) 13%, transparent);
+  --yb:color-mix(in srgb, var(--y) 26%, transparent);
+  --y-fade:color-mix(in srgb, var(--y) 6%, transparent)}
+
+.ns-today .cnt{padding:0 calc(18px * var(--dens))}
+.ns-today .card{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r2)}
+
+/* section heads — DO's tt-head, so the two read as the same app */
+.ns-today .ty-sec{margin-top:calc(26px * var(--dens))}
+.ns-today .ty-sec-h{display:flex;align-items:center;gap:calc(10px * var(--dens));width:100%;
+  background:none;border:none;border-bottom:var(--bw) solid var(--bd);border-radius:0;cursor:default;
+  font:700 10px/1 var(--head);letter-spacing:.15em;text-transform:var(--caps);color:var(--y);text-align:left;
+  padding:0 0 calc(9px * var(--dens));margin:0 0 calc(10px * var(--dens))}
+.ns-today button.ty-sec-h{cursor:pointer}
+.ns-today .ty-sec-h > span{flex:0 0 auto}
+.ns-today .ty-sec-h em{flex:1;font:400 10px/1 var(--mono);letter-spacing:.04em;text-transform:none;color:var(--tx-2);
+  font-style:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ns-today .ty-sec-h i{flex:0 0 auto;display:flex;color:var(--mu)}
+.ns-today .ty-sec-h i svg{width:14px;height:14px}
+.ns-today .ty-fold svg{transition:transform var(--dur-2) var(--ease)}
+.ns-today .ty-fold.open svg{transform:rotate(180deg)}
+.ns-today .ty-sec-h:active{color:var(--tx)}
+
+/* a section head that is a screen's own child, not inside a section */
+.ns-today .cnt > .ty-sec-h{margin-top:calc(26px * var(--dens))}
+.ns-today .cnt > .ty-sec-h:first-child{margin-top:calc(16px * var(--dens))}
+
+.ns-today .ty-fine{font:400 10.5px/1.5 var(--mono);color:var(--tx-2);margin:calc(6px * var(--dens)) 0}
+.ns-today .ty-fine.big{font-size:12px;line-height:1.6;margin:calc(16px * var(--dens)) 0}
+.ns-today .ty-fine b{color:var(--tx);font-weight:700}
+
+/* ── the bad-day note ── */
+.ns-today .ty-badnote{margin:calc(4px * var(--dens)) 0 calc(14px * var(--dens));
+  padding:calc(12px * var(--dens)) calc(14px * var(--dens));border-radius:var(--r2);
+  background:var(--s1);border:var(--bw) dashed var(--bd-2);
+  font:400 11.5px/1.5 var(--mono);color:var(--tx-2)}
+
+/* ── carry / drop ── */
+.ns-today .ty-carry{padding:calc(14px * var(--dens));margin:0 0 calc(14px * var(--dens))}
+.ns-today .ty-carry .ty-sec-h{margin-bottom:calc(6px * var(--dens))}
+.ns-today .ty-carry-r{display:flex;align-items:center;gap:calc(8px * var(--dens));padding:calc(7px * var(--dens)) 0}
+.ns-today .ty-carry-t{flex:1;min-width:0;font:400 12.5px/1.4 var(--mono);color:var(--tx);overflow-wrap:anywhere}
+.ns-today .ty-carry-all{display:flex;gap:calc(8px * var(--dens));margin-top:calc(8px * var(--dens));justify-content:flex-end}
+.ns-today .ty-mini{background:var(--yd);border:var(--bw) solid var(--yb);color:var(--y);border-radius:var(--r1);
+  font:700 10px/1 var(--mono);letter-spacing:.06em;text-transform:var(--caps);cursor:pointer;
+  padding:calc(8px * var(--dens)) calc(11px * var(--dens));flex:0 0 auto}
+.ns-today .ty-mini.q{background:none;border-color:var(--bd-2);color:var(--tx-2)}
+.ns-today .ty-mini:disabled{opacity:.35;cursor:default}
+.ns-today .ty-mini:active{background:var(--press)}
+
+/* ── the two anchors ── */
+.ns-today .ty-anchors{display:grid;grid-template-columns:1fr 1fr;gap:calc(8px * var(--dens));margin:0 0 calc(12px * var(--dens))}
+.ns-today .ty-anchors.one{grid-template-columns:1fr}
+.ns-today .ty-anc{display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;gap:calc(9px * var(--dens));min-width:0;
+  background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r2);
+  padding:calc(11px * var(--dens)) calc(12px * var(--dens));min-height:calc(76px * var(--dens))}
+.ns-today .ty-anc-l{display:flex;flex-direction:column;gap:5px;min-width:0;
+  font:700 10px/1 var(--head);letter-spacing:.14em;text-transform:var(--caps);color:var(--tx-2)}
+.ns-today .ty-anc-l em{font:400 9.5px/1 var(--mono);letter-spacing:.03em;text-transform:none;font-style:normal;color:var(--mu);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ns-today .ty-anc-v{font:800 24px/1 var(--head);font-variant-numeric:tabular-nums;color:var(--tx);white-space:nowrap}
+.ns-today .ty-anc-v.dim{color:var(--mu)}
+.ns-today .ty-anc-v small{font:400 8.5px/1 var(--mono);letter-spacing:.08em;text-transform:var(--caps);color:var(--tx-2);margin-left:6px}
+.ns-today .ty-anc-in{width:100%;flex:0 0 auto;text-align:left;
+  font:800 24px/1 var(--head);font-variant-numeric:tabular-nums;color:var(--tx);
+  background:none;border:none;border-bottom:var(--bw) dashed var(--bd-2);border-radius:0;padding:4px 0}
+.ns-today .ty-anc-in:focus,.ns-today .ty-anc-in.pad-on{outline:none;border-bottom-color:var(--y)}
+.ns-today .ty-anc-b{flex:0 0 auto;background:var(--y);color:var(--on-y);border:none;border-radius:var(--r1);cursor:pointer;
+  font:700 10.5px/1 var(--mono);letter-spacing:.06em;text-transform:var(--caps);
+  padding:calc(9px * var(--dens)) calc(11px * var(--dens))}
+.ns-today .ty-anc-b:active{filter:brightness(.9)}
+
+/* ── the next action: the one big thing ── */
+.ns-today .ty-next{position:relative;overflow:hidden;padding:calc(16px * var(--dens)) calc(16px * var(--dens)) calc(14px * var(--dens));
+  border-color:var(--yb);background:linear-gradient(var(--y-fade), var(--y-fade)), var(--s1)}
+.ns-today .ty-next::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--y)}
+.ns-today .ty-next.calm{border-color:var(--bd);background:var(--s1)}
+.ns-today .ty-next.calm::before{background:var(--bd-2)}
+.ns-today .ty-next-h{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:calc(12px * var(--dens))}
+.ns-today .ty-tag{background:var(--y);color:var(--on-y);border-radius:var(--r1);
+  font:700 9.5px/1 var(--head);letter-spacing:.16em;text-transform:var(--caps);padding:5px 8px}
+.ns-today .ty-next.calm .ty-tag{background:var(--s2);color:var(--tx-2)}
+.ns-today .ty-next-pos{font:400 10px/1 var(--mono);letter-spacing:.06em;color:var(--tx-2);text-transform:var(--caps);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ns-today .ty-next-t{font:800 clamp(24px, 7.4vw, 30px)/1.05 var(--head);letter-spacing:-.01em;color:var(--tx);
+  text-transform:var(--caps);overflow-wrap:anywhere;text-shadow:var(--title-sh-x) 0 0 var(--title-sh-c)}
+.ns-today .ty-next-s{font:400 11.5px/1.5 var(--mono);color:var(--tx-2);margin-top:calc(8px * var(--dens))}
+.ns-today .ty-next-acts{display:flex;flex-wrap:wrap;gap:calc(8px * var(--dens));margin-top:calc(14px * var(--dens))}
+.ns-today .ty-next-acts.col{flex-direction:column}
+.ns-today .ty-next-more{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  gap:calc(8px * var(--dens));margin-top:calc(12px * var(--dens))}
+
+/* the two answers — a big press target each */
+.ns-today .ty-pill{flex:1 1 0;min-width:max-content;display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  min-height:calc(46px * var(--dens));padding:0 calc(14px * var(--dens));cursor:pointer;
+  background:var(--s2);border:var(--bw) solid var(--bd-2);border-radius:var(--r2);color:var(--tx);
+  font:700 11px/1 var(--mono);letter-spacing:.07em;text-transform:var(--caps);
+  transition:background var(--dur-1),border-color var(--dur-1),color var(--dur-1)}
+.ns-today .ty-pill svg{width:15px;height:15px;flex:0 0 auto}
+.ns-today .ty-pill.on{background:var(--y);border-color:var(--y);color:var(--on-y)}
+.ns-today .ty-pill.go{background:var(--yd);border-color:var(--y);color:var(--y)}
+.ns-today .ty-pill.go svg{fill:currentColor}
+.ns-today .ty-pill.q{background:none;color:var(--tx-2)}
+.ns-today .ty-pill:active{background:var(--press);filter:brightness(1.08)}
+.ns-today .ty-pill.on:active{background:var(--y)}
+.ns-today .ty-link{display:inline-flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;padding:6px 0;
+  color:var(--y);font:400 11px/1 var(--mono);letter-spacing:.04em}
+.ns-today .ty-link svg{width:13px;height:13px;flex:0 0 auto}
+.ns-today .ty-link.go svg{fill:currentColor;stroke:none}
+.ns-today .ty-quiet{background:none;border:none;cursor:pointer;padding:6px 0;margin-left:auto;
+  color:var(--tx-2);font:400 10.5px/1 var(--mono);letter-spacing:.04em;text-decoration:underline;text-underline-offset:3px;
+  text-decoration-color:var(--bd-2)}
+
+/* ── the week's goals, as a strip ── */
+.ns-today .ty-wchips{display:flex;flex-wrap:wrap;gap:calc(6px * var(--dens))}
+.ns-today .ty-wchip{display:inline-flex;align-items:center;gap:6px;max-width:100%;cursor:pointer;
+  background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r-pill);color:var(--tx);
+  font:400 11px/1.25 var(--mono);padding:calc(8px * var(--dens)) calc(12px * var(--dens));text-align:left}
+.ns-today .ty-wchip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ns-today .ty-wchip svg{width:12px;height:12px;flex:0 0 auto}
+.ns-today .ty-wchip.on{background:var(--yd);border-color:var(--yb);color:var(--y)}
+.ns-today .ty-wchip.add{border-style:dashed;color:var(--tx-2)}
+
+/* ── goals and every other tickable row ── */
+.ns-today .ty-goal{display:flex;align-items:center;gap:calc(11px * var(--dens));
+  padding:calc(9px * var(--dens)) 0;border-bottom:var(--bw) solid var(--bd)}
+.ns-today .ty-goal:last-of-type{border-bottom:none}
+.ns-today .ty-ck{flex:0 0 auto;width:28px;height:28px;border-radius:50%;cursor:pointer;display:grid;place-items:center;
+  background:none;border:calc(var(--bw) * 1.5) solid var(--bd-2);color:transparent;padding:0;
+  transition:background var(--dur-1),border-color var(--dur-1),color var(--dur-1)}
+.ns-today .ty-ck svg{width:15px;height:15px}
+.ns-today .ty-ck.on{background:var(--y);border-color:var(--y);color:var(--on-y)}
+.ns-today .ty-goal-t{flex:1;min-width:0;font:400 12.5px/1.45 var(--mono);color:var(--tx);overflow-wrap:anywhere}
+.ns-today .ty-goal-t small{display:block;font-size:9.5px;color:var(--tx-2);margin-top:2px;letter-spacing:.03em}
+.ns-today .ty-goal.done .ty-goal-t{color:var(--tx-2)}
+.ns-today .ty-x{flex:0 0 auto;width:30px;height:30px;background:none;border:none;color:var(--mu);font-size:17px;cursor:pointer;border-radius:var(--r1)}
+.ns-today .ty-x:active{color:var(--tx);background:var(--press)}
+.ns-today .ty-count{flex:0 0 auto;font:700 13px/1 var(--head);font-variant-numeric:tabular-nums;color:var(--tx)}
+.ns-today .ty-count em{font:400 10px/1 var(--mono);font-style:normal;color:var(--tx-2);margin-left:1px}
+.ns-today .ty-add{display:flex;gap:calc(6px * var(--dens));margin-top:calc(10px * var(--dens))}
+.ns-today .ty-add input{flex:1;min-width:0;background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+  color:var(--tx);font:400 12.5px/1 var(--mono);padding:calc(12px * var(--dens)) calc(12px * var(--dens))}
+.ns-today .ty-add input:focus{outline:none;border-color:var(--y)}
+.ns-today .ty-add input::placeholder{color:var(--mu)}
+.ns-today .ty-add-b{flex:0 0 auto;background:var(--y);color:var(--on-y);border:none;border-radius:var(--r1);cursor:pointer;
+  font:700 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:var(--caps);padding:0 calc(16px * var(--dens))}
+.ns-today .ty-hint{font:400 10px/1.4 var(--mono);color:var(--tx-2);margin-top:calc(7px * var(--dens));letter-spacing:.02em}
+
+/* ── the morning chain ── */
+.ns-today .ty-dots-row{display:flex;align-items:center;gap:calc(12px * var(--dens));width:100%;cursor:pointer;
+  background:none;border:none;padding:calc(4px * var(--dens)) 0;color:var(--tx-2);font:400 10.5px/1 var(--mono);letter-spacing:.04em}
+.ns-today .ty-dots{display:flex;gap:6px}
+.ns-today .ty-dots i,.ns-today .ty-cells i{display:block;width:12px;height:12px;border-radius:50%;
+  border:calc(var(--bw) * 1.5) solid var(--bd-2);box-sizing:border-box}
+.ns-today .ty-dots i.f,.ns-today .ty-cells i.f{background:var(--y);border-color:var(--y)}
+.ns-today .ty-dots i.m,.ns-today .ty-cells i.m{border-color:var(--y);
+  background:linear-gradient(90deg, var(--y) 50%, transparent 50%)}
+.ns-today .ty-dots i.s,.ns-today .ty-cells i.s{border-style:dashed;border-color:var(--tx-2)}
+.ns-today .ty-step{display:flex;align-items:center;gap:calc(10px * var(--dens));
+  padding:calc(10px * var(--dens)) 0;border-bottom:var(--bw) solid var(--bd);transition:opacity var(--dur-2)}
+.ns-today .ty-step:last-child{border-bottom:none}
+.ns-today .ty-step.dim{opacity:.55}
+.ns-today .ty-step.skip{opacity:.45}
+.ns-today .ty-step-ix{flex:0 0 auto;min-width:24px;font:700 10px/1 var(--head);letter-spacing:.1em;color:var(--mu);
+  text-transform:var(--caps);font-variant-numeric:tabular-nums}
+.ns-today .ty-step.next .ty-step-ix{color:var(--on-y);background:var(--y);border-radius:var(--r1);padding:4px 5px;font-size:8.5px}
+.ns-today .ty-step.done .ty-step-ix{color:var(--y)}
+.ns-today .ty-step-b{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.ns-today .ty-step-b b{font:700 12px/1.2 var(--head);letter-spacing:.06em;text-transform:var(--caps);color:var(--tx)}
+.ns-today .ty-step-b small{font:400 10px/1.35 var(--mono);color:var(--tx-2);overflow-wrap:anywhere}
+.ns-today .ty-step-acts{flex:0 0 auto;display:flex;gap:5px}
+.ns-today .ty-step-acts .ty-pill{flex:0 0 auto;min-height:calc(34px * var(--dens));min-width:0;
+  padding:0 calc(10px * var(--dens));font-size:9.5px;border-radius:var(--r1);gap:4px}
+.ns-today .ty-step-acts .ty-pill svg{width:12px;height:12px}
+
+/* ── focus ── */
+.ns-today .ty-areas{display:flex;flex-wrap:wrap;gap:calc(6px * var(--dens));margin-bottom:calc(10px * var(--dens))}
+.ns-today .ty-area{display:inline-flex;align-items:center;gap:7px;cursor:pointer;
+  background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r-pill);color:var(--tx-2);
+  font:700 10px/1 var(--mono);letter-spacing:.07em;text-transform:var(--caps);padding:calc(8px * var(--dens)) calc(12px * var(--dens))}
+.ns-today .ty-area::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--ar, var(--y))}
+.ns-today .ty-area b{font:800 11px/1 var(--head);color:var(--tx)}
+.ns-today .ty-area.on{border-color:var(--ar, var(--y));color:var(--tx);
+  background:color-mix(in srgb, var(--ar, var(--y)) 14%, var(--s1))}
+.ns-today .ty-pom{display:flex;align-items:center;gap:calc(14px * var(--dens));
+  background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r2);padding:calc(10px * var(--dens)) calc(12px * var(--dens))}
+.ns-today .ty-pom.live{border-color:var(--yb)}
+.ns-today .ty-play{flex:0 0 auto;width:46px;height:46px;border-radius:var(--r2);border:none;cursor:pointer;
+  background:var(--y);color:var(--on-y);display:grid;place-items:center}
+.ns-today .ty-play svg{width:20px;height:20px;fill:currentColor}
+.ns-today .ty-pom.brk .ty-play{background:#3fc9b0}
+.ns-today .ty-pom-t{font:800 28px/1 var(--head);font-variant-numeric:tabular-nums;letter-spacing:-.02em;color:var(--tx)}
+.ns-today .ty-pom-s{flex:1;min-width:0;text-align:right;font:400 10px/1.3 var(--mono);color:var(--tx-2);
+  letter-spacing:.05em;text-transform:var(--caps)}
+
+/* ── the life-dump row ── */
+.ns-today .ty-dumprow{display:flex;align-items:center;gap:calc(12px * var(--dens));width:100%;cursor:pointer;text-align:left;
+  margin-top:calc(22px * var(--dens));background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r2);
+  padding:calc(13px * var(--dens)) calc(14px * var(--dens));color:var(--tx)}
+.ns-today .ty-dr-l{flex:0 0 auto;font:700 9.5px/1 var(--head);letter-spacing:.15em;text-transform:var(--caps);color:var(--y)}
+.ns-today .ty-dr-t{flex:1;min-width:0;font:400 11.5px/1.35 var(--mono);color:var(--tx-2)}
+.ns-today .ty-dr-t b{color:var(--tx);font-weight:700}
+.ns-today .ty-dr-t small{display:block;font-size:9.5px;margin-top:2px}
+.ns-today .ty-go{display:flex;color:var(--mu)}
+.ns-today .ty-go svg{width:14px;height:14px}
+
+/* ── the week ── */
+.ns-today .ty-wk-days,.ns-today .ty-wrow{display:grid;grid-template-columns:minmax(0,1fr) auto calc(40px * var(--dens));
+  align-items:center;gap:calc(10px * var(--dens))}
+.ns-today .ty-wk-days{grid-template-columns:minmax(0,1fr) repeat(7, 12px) calc(40px * var(--dens));gap:6px;
+  font:700 8.5px/1 var(--mono);color:var(--mu);text-transform:var(--caps);margin-bottom:6px}
+.ns-today .ty-wk-days span{text-align:center}
+.ns-today .ty-wk-days span:first-child{grid-column:2}
+.ns-today .ty-wk-days span.on{color:var(--y)}
+.ns-today .ty-wrow{padding:calc(7px * var(--dens)) 0;border-bottom:var(--bw) solid var(--bd)}
+.ns-today .ty-wrow.opt{opacity:.7}
+.ns-today .ty-wrow-l{font:400 11.5px/1.3 var(--mono);color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ns-today .ty-cells{display:flex;gap:6px}
+.ns-today .ty-cells i.x{border-style:dotted;border-color:var(--bd)}
+.ns-today .ty-wrow-n{text-align:right;font:800 13px/1 var(--head);font-variant-numeric:tabular-nums;color:var(--tx)}
+.ns-today .ty-wrow-n em{font:400 9.5px/1 var(--mono);font-style:normal;color:var(--tx-2)}
+.ns-today .ty-tiles{display:grid;grid-template-columns:1fr 1fr;gap:calc(8px * var(--dens))}
+.ns-today .ty-tile{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r2);
+  padding:calc(12px * var(--dens));display:flex;flex-direction:column;gap:7px}
+.ns-today .ty-tile b{font:800 24px/1 var(--head);font-variant-numeric:tabular-nums;color:var(--tx)}
+.ns-today .ty-tile b em{font:400 11px/1 var(--mono);font-style:normal;color:var(--tx-2)}
+.ns-today .ty-tile span{font:700 9.5px/1 var(--head);letter-spacing:.13em;text-transform:var(--caps);color:var(--tx-2)}
+.ns-today .ty-pomsplit{display:flex;flex-wrap:wrap;gap:calc(12px * var(--dens));margin-top:calc(12px * var(--dens));
+  font:400 11px/1 var(--mono);color:var(--tx-2)}
+.ns-today .ty-pomsplit span{display:inline-flex;align-items:center;gap:6px}
+.ns-today .ty-pomsplit i{width:8px;height:8px;border-radius:50%;background:var(--ar)}
+.ns-today .ty-pomsplit b{color:var(--tx)}
+
+/* ── hygiene ── */
+.ns-today .ty-shower{text-align:center;padding:calc(20px * var(--dens)) calc(16px * var(--dens)) calc(16px * var(--dens));
+  margin-top:calc(14px * var(--dens))}
+.ns-today .ty-shower.live{border-color:var(--yb);background:linear-gradient(var(--y-fade), var(--y-fade)), var(--s1)}
+.ns-today .ty-shower-t{font:800 clamp(48px, 16vw, 64px)/1 var(--head);font-variant-numeric:tabular-nums;letter-spacing:-.03em;
+  color:var(--tx);text-shadow:var(--title-sh-x) 0 0 var(--title-sh-c)}
+.ns-today .ty-shower-s{font:400 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:var(--caps);color:var(--tx-2);margin-top:10px}
+.ns-today .ty-shower .ty-fine{max-width:30ch;margin:10px auto 0}
+
+/* ── the evening ── */
+.ns-today .ty-daypick{display:flex;gap:6px;margin-top:calc(14px * var(--dens))}
+.ns-today .ty-chip{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);color:var(--tx-2);cursor:pointer;
+  font:700 10px/1 var(--mono);letter-spacing:.07em;text-transform:var(--caps);padding:calc(9px * var(--dens)) calc(12px * var(--dens))}
+.ns-today .ty-chip.on{background:var(--yd);border-color:var(--y);color:var(--y)}
+.ns-today .ty-dump{width:100%;box-sizing:border-box;resize:vertical;min-height:140px;
+  background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r2);color:var(--tx);
+  font:400 13px/1.6 var(--mono);padding:calc(12px * var(--dens))}
+.ns-today .ty-dump:focus{outline:none;border-color:var(--y)}
+.ns-today .ty-dump::placeholder{color:var(--mu)}
+.ns-today .ty-md{margin:calc(12px * var(--dens)) 0 0;max-height:360px;overflow:auto;touch-action:pan-x pan-y;
+  background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r2);padding:calc(12px * var(--dens));
+  font:400 10.5px/1.55 var(--mono);color:var(--tx-2);white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* ── the life-dump map ── */
+.ns-today .ty-msec{margin-top:calc(14px * var(--dens));background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r2);
+  padding:calc(4px * var(--dens)) calc(12px * var(--dens)) calc(6px * var(--dens))}
+.ns-today .ty-msec-h{display:flex;align-items:center;gap:10px;padding:calc(9px * var(--dens)) 0;border-bottom:var(--bw) solid var(--bd)}
+.ns-today .ty-msec-h b{flex:1;min-width:0;font:700 11px/1.25 var(--head);letter-spacing:.07em;text-transform:var(--caps);color:var(--tx)}
+.ns-today .ty-msec-h em{font:400 9.5px/1 var(--mono);font-style:normal;color:var(--tx-2);white-space:nowrap}
+.ns-today .ty-mitem{display:flex;align-items:center;gap:10px;width:100%;text-align:left;cursor:pointer;
+  background:none;border:none;border-bottom:var(--bw) solid var(--bd);padding:calc(10px * var(--dens)) 0;color:var(--tx)}
+.ns-today .ty-mitem:last-child{border-bottom:none}
+.ns-today .ty-mitem i{flex:0 0 auto;width:13px;height:13px;border-radius:50%;border:calc(var(--bw) * 1.5) solid var(--bd-2)}
+.ns-today .ty-mitem.partial i{border-color:var(--y);background:linear-gradient(90deg, var(--y) 50%, transparent 50%)}
+.ns-today .ty-mitem.done i{border-color:var(--y);background:var(--y)}
+.ns-today .ty-mitem span{flex:1;min-width:0;font:400 12px/1.4 var(--mono);overflow-wrap:anywhere}
+.ns-today .ty-mitem.done span{color:var(--tx-2)}
+.ns-today .ty-mitem em{font:400 9.5px/1 var(--mono);font-style:normal;color:var(--tx-2);text-transform:var(--caps)}
+
+@media (hover:hover){
+  .ns-today .hd-back:hover,.ns-today .ty-link:hover{color:var(--tx)}
+  .ns-today .ty-pill:hover{border-color:var(--y)}
+  .ns-today button.ty-sec-h:hover{color:var(--tx)}
+}
