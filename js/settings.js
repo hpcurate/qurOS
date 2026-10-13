@@ -1,0 +1,2774 @@
+/* Settings: app panels, appearance/behaviour and data.
+   data-pref controls use delegated handlers. Each data-group editor reads its
+   entire Config branch from the DOM. Keep app namespaces on settings markup
+   so each module's scoped lookups also find its controls here. */
+window.SET = (function () {
+'use strict';
+
+const SCOPE = '.ns-set ';
+const $id  = id  => document.querySelector(SCOPE + '#' + id);
+const $one = sel => document.querySelector(SCOPE + sel);
+const $all = sel => document.querySelectorAll(SCOPE + sel);
+const esc  = s => String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+const PANELS = ['look','layout','behave','do','log','plan','store','tend','track','learn','cal','create','tools','sync','data'];
+/* Which category a panel sits in, and what its pill says. `data` is a single
+   panel, so its category shows no pill bar. */
+const CATS = {
+  apps:       { title:'apps',       hint:"each app's own settings and content", panels:['do','log','plan','store','tend','track','learn','cal','create','tools'] },
+  appearance: { title:'appearance', hint:'theme, layout, behaviour',            panels:['look','layout','behave'] },
+  sync:       { title:'sync',       hint:'two devices, one board — what travels and how often', panels:['sync'] },
+  data:       { title:'data',       hint:'todoist key, backup, storage, resets', panels:['data'] },
+};
+const SEG_NAMES = { look:'look', layout:'layout', behave:'behaviour', data:'data', sync:'sync',
+                    do:'do', log:'log', plan:'plan', store:'store', tend:'tend', track:'track', learn:'learn', cal:'day',
+                    create:'create', tools:'tools' };
+const catOf = name => Object.keys(CATS).find(c => CATS[c].panels.includes(name)) || null;
+let currentPanel = 'look';
+let currentCat = null;          // null = the home menu
+const lastPanel = {};           // per category: the pill you were on
+
+/* Display names for the app list and the start-tab chips. */
+/* Display names. `cal` is the app's id everywhere it is an identity — the
+   storage key, the namespace, Prefs.APPS, the settings panel — and DAY is only
+   what it is called. Renaming the id would churn all four for a word. */
+const APP_NAMES = { do:'DO', log:'LOG', plan:'PLAN', store:'STORE', tend:'TEND', track:'TRACK', learn:'LEARN', cal:'DAY',
+                    create:'CREATE', tools:'TOOLS' };
+const APP_HINTS = { do:'routines + packing', log:'daily log', plan:'todoist queue', store:'groceries',
+                    tend:'plant care', track:'CAP curriculum', learn:'anki decks', cal:'the planned day',
+                    create:'songs and mixes', tools:'pomodoro + timers' };
+
+/* Which storage keys belong to which app — read-only bookkeeping for the
+   storage report. The shell never writes to another app's keys. LEARN's decks
+   are in IndexedDB, not here; renderStorage() asks the module for them. */
+const GROUPS = [
+  { name:'DO',    color:'#A78BFA', match:k => k.startsWith('do_') || k === 'do-stats-v1' || k.startsWith('travel_state_') },
+  { name:'LOG',   color:'#5cdb7d', match:k => k.startsWith('log_') || k === 'log-scale-v2' },
+  { name:'PLAN',  color:'#5e8cff', match:k => k.startsWith('plan_') },
+  { name:'STORE', color:'#e8a33d', match:k => k === 'store_state_v1' || k === 'eat_state_v1' },
+  { name:'TEND',  color:'#3fc9b0', match:k => k.startsWith('tend.') || k.startsWith('tend_') },
+  { name:'DAY',   color:'#c98b3f', match:k => k === 'cal_days_v1' },
+  { name:'TRACK', color:'#f0709a', match:k => k.startsWith('capTracker.') },
+  { name:'LEARN', color:'#5ad4e6', match:k => k.startsWith('learn_') },
+  { name:'CREATE',color:'#e6c34a', match:k => k.startsWith('create_') },
+  { name:'TOOLS', color:'#5cdb7d', match:k => k.startsWith('tools_') },
+  { name:'ROOT',  color:'#e06f9a', match:k => k.startsWith('root_') },
+];
+
+const allKeys = () => { try { return Object.keys(localStorage); } catch { return []; } };
+const fmtSize = n => { const kb = n/1024;
+  return kb < 1 ? n + ' B' : kb < 1024 ? kb.toFixed(1) + ' KB' : (kb/1024).toFixed(2) + ' MB'; };
+
+/* Sprite ids the STORE category editor may choose from. */
+const STORE_ICONS = ['ico-veg','ico-fruit','ico-meat','ico-snack','ico-carbs','ico-can','ico-dairy',
+  'ico-frozen','ico-breakfast','ico-cond','ico-spice','ico-drink','ico-meal','ico-list','ico-other'];
+
+const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'') || 'x';
+const uniqueKey = (base, taken) => {
+  let k = slug(base), n = 2;
+  while (taken.includes(k)) k = slug(base) + '_' + n++;
+  return k;
+};
+const lines = s => String(s || '').split('\n').map(x => x.trim()).filter(Boolean);
+/* CREATE's three optional meta chips. The module owns their prompts and their
+   units; this list is only what the area editor draws a checkbox for. */
+const CREATE_FIELDS = [{ k:'bpm', label:'tempo' }, { k:'key', label:'key' }, { k:'tags', label:'tags' }];
+
+/* Stage palettes
+   Six ramps, one tap each, offered on every area in the CREATE editor.
+
+   Picking a stage colour is really picking six or seven colours that have to
+   read as a *sequence* — that is the whole point of the stage bar 4.3 draws, a
+   work three stages in looking different from one that has just started — and
+   doing it one `<input type=color>` at a time is choosing each colour without
+   seeing the others.
+
+   A ramp is **sampled** across however many stages the area has rather than
+   cycled, so the last stage always lands on the last colour: the finished one
+   is the end of the ramp whether the path is four stages or nine.
+
+   The swatches stay editable afterwards and nothing records which palette was
+   used. It is a starting point, not a mode the area is now in — the same rule
+   the theme presets follow, where moving a dial afterwards is expected rather
+   than a state to be recovered from. */
+const STAGE_PALETTES = [
+  { id:'spectrum', label:'spectrum', colors:['#a78bfa','#5e8cff','#3fc9b0','#e8a33d','#f0709a','#5cdb7d'] },
+  { id:'ember',    label:'ember',    colors:['#5f3a2e','#8c4a2f','#c8682f','#e8a33d','#f2cf6a','#ffe9a8'] },
+  { id:'ocean',    label:'ocean',    colors:['#2b3a55','#2f5f86','#2f8ca8','#3fc9b0','#7fe0c4','#c3f2df'] },
+  { id:'forest',   label:'forest',   colors:['#33452f','#3f6b3a','#4f8f45','#6cb355','#9ad46f','#c9ea9a'] },
+  { id:'dusk',     label:'dusk',     colors:['#3b2f57','#5b3f86','#8451b8','#a78bfa','#cbb2ff','#e6dbff'] },
+  { id:'mono',     label:'mono',     colors:['#4a4a4a','#5f5f5f','#767676','#8f8f8f','#adadad','#d0d0d0'] },
+];
+function paletteRamp(id, n) {
+  const p = STAGE_PALETTES.find(x => x.id === id);
+  if (!p || n < 1) return null;
+  if (n === 1) return [p.colors[p.colors.length - 1]];
+  return Array.from({ length: n }, (_, i) =>
+    p.colors[Math.round(i * (p.colors.length - 1) / (n - 1))]);
+}
+
+/* PLAN's day templates, as text
+   A row is an offset from the day's start and a duration, both in minutes, and
+   then either one field (a block slot) or two (an event and the calendar it
+   goes on). Only the first three pipes divide a line, because a calendar name
+   — "01A1 | routine" — carries one of its own.
+
+       0:00 | 30 | routine p1 | 01A1 | routine
+       4:00 | 90 | b1a */
+const tplHM = m => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+const tplLine = r => `${tplHM(+r.at || 0)} | ${+r.dur || 0} | ` +
+  (r.slot ? r.slot : `${r.event || ''} | ${r.cal || ''}`);
+/* "1:45", "105", "1h45" and "45m" are all the same number of minutes. */
+function tplMin(s) {
+  const v = String(s).trim().replace(/^\+/, '');
+  let m = /^(\d+):([0-5]\d)$/.exec(v);
+  if (m) return +m[1] * 60 + +m[2];
+  m = /^(?:(\d+)\s*h)?\s*(\d+)?\s*m?$/i.exec(v);
+  if (m && (m[1] || m[2])) return (+(m[1] || 0)) * 60 + (+(m[2] || 0));
+  return null;
+}
+function tplRow(line) {
+  const bits = [];
+  let rest = String(line);
+  while (bits.length < 3) {
+    const p = rest.indexOf('|');
+    if (p < 0) break;
+    bits.push(rest.slice(0, p).trim());
+    rest = rest.slice(p + 1);
+  }
+  bits.push(rest.trim());
+  if (bits.length < 3) return null;
+  const at = tplMin(bits[0]), dur = tplMin(bits[1]);
+  if (at === null || dur === null || !bits[2]) return null;
+  return bits[3] ? { at, dur, cal: bits[3], event: bits[2] } : { at, dur, slot: bits[2] };
+}
+// how long the day runs, for the badge above each template
+const fmtSpan = rows => {
+  const end = rows.reduce((n, r) => Math.max(n, (+r.at || 0) + (+r.dur || 0)), 0);
+  return `${Math.floor(end / 60)}h${String(end % 60).padStart(2, '0')}`;
+};
+
+
+/* Control builders
+   All three read their current value straight from Prefs, so a re-render after
+   any change needs no bookkeeping. */
+
+function chips(prefKey, opts, label, note) {
+  const cur = Prefs.get(prefKey);
+  return `<div class="opt-set">
+    <label class="lbl">${esc(label)}${note ? `<em>${esc(note)}</em>` : ''}</label>
+    <div class="chips">${opts.map(o => {
+      const v = typeof o === 'string' ? o : o.v;
+      const l = typeof o === 'string' ? o : o.l;
+      return `<button class="chip${v === cur ? ' on' : ''}" data-pref="${prefKey}" data-val="${esc(v)}">${esc(l)}</button>`;
+    }).join('')}</div></div>`;
+}
+
+/* `auto` sliders (radius, border) sit at null until the user touches them, at
+   which point the theme stops deciding. The readout says which is true. */
+/* `note` renders as the same <em> hint chips() uses, so the tips switch reaches
+   it for free (`[data-tips="off"] .slider-head .lbl em`). */
+function slider(prefKey, label, fmt, note) {
+  const s = Prefs.SCHEMA[prefKey];
+  const raw = Prefs.get(prefKey);
+  const isAuto = raw === null;
+  const ch = Prefs.character();
+  const shown = isAuto ? (prefKey === 'radius' ? ch.radius : prefKey === 'border' ? ch.border : s.def) : raw;
+  const read = isAuto ? `auto · ${shown}${s.unit || ''}` : (fmt ? fmt(shown) : shown + (s.unit || ''));
+  return `<div class="slider-row" data-slider="${prefKey}">
+    <div class="slider-head">
+      <label class="lbl">${esc(label)}${note ? `<em>${esc(note)}</em>` : ''}</label>
+      <span class="slider-val${isAuto ? ' is-auto' : ''}">${esc(read)}</span>
+    </div>
+    <input type="range" class="sl" data-pref="${prefKey}"
+           min="${s.min}" max="${s.max}" step="${s.step}" value="${shown}">
+  </div>`;
+}
+
+function toggle(prefKey, label, sub) {
+  const on = !!Prefs.get(prefKey);
+  return `<div class="setting-row">
+    <span class="setting-lbl">${esc(label)}${sub ? `<small>${esc(sub)}</small>` : ''}</span>
+    <button class="tog${on ? ' on' : ''}" data-pref="${prefKey}" data-toggle="1"
+            role="switch" aria-checked="${on}" aria-label="${esc(label)}"></button>
+  </div>`;
+}
+
+const sectionHead = (title, resetPath) =>
+  `<div class="sec"><span>${esc(title)}</span>${
+    resetPath ? `<button class="sec-reset${Config.isCustom(resetPath) ? '' : ' hidden'}"
+                          data-cfg-reset="${resetPath}">reset to default</button>` : ''}</div>`;
+
+
+/* LOOK */
+
+function previewHTML() {
+  return `<div class="preview">
+    <div class="pv-top"><div class="pv-logo">ROOT<em>.</em></div><div class="pv-tag">live preview</div></div>
+    <div class="pv-bar"><i></i></div>
+    <div class="pv-row">
+      <div class="pv-card"><div class="pv-card-t">Morning</div><div class="pv-card-s">data + workout</div></div>
+      <div class="pv-card"><div class="pv-card-t">Evening</div><div class="pv-card-s">blocks done</div></div>
+    </div>
+    <div class="pv-btns">
+      <span class="pv-btn">save</span>
+      <span class="pv-btn ghost">cancel</span>
+      <span class="pv-btn acc">3 / 7</span>
+    </div>
+  </div>`;
+}
+
+function themeCards(group) {
+  const cur = Prefs.activeTheme();
+  return Prefs.THEMES.filter(t => t.group === group).map(t => `
+    <button class="theme-card${t.id === cur ? ' on' : ''}" data-theme-pick="${t.id}">
+      <span class="theme-swatch">${t.sw.map(c => `<i style="background:${c}"></i>`).join('')}</span>
+      <span class="theme-name">${esc(t.name)}<span class="tick">✓</span></span>
+      <span class="theme-desc">${esc(t.desc)}</span>
+    </button>`).join('');
+}
+
+/* The three generated panels are built as strings and assigned separately, so
+   search can render one into a detached node and read the real labels off the
+   real controls rather than off a second list that would go stale. */
+function renderLook()   { $id('panel-look').innerHTML   = lookHTML(); }
+function renderLayout() { $id('panel-layout').innerHTML = layoutHTML(); }
+function renderBehave() { $id('panel-behave').innerHTML = behaveHTML(); }
+
+function lookHTML() {
+  const mode = Prefs.get('themeMode');
+  const acc  = Prefs.get('accent');
+  const custom = Prefs.normHex(Prefs.get('accentCustom'));
+
+  return previewHTML() + `
+
+    ${sectionHead('Theme')}
+    <div class="opt-set">
+      <label class="lbl">Follow the system<em>${mode === 'system' ? 'dark and light swap automatically' : 'one theme, always'}</em></label>
+      <div class="chips">
+        <button class="chip${mode === 'fixed'  ? ' on' : ''}" data-pref="themeMode" data-val="fixed">fixed</button>
+        <button class="chip${mode === 'system' ? ' on' : ''}" data-pref="themeMode" data-val="system">auto</button>
+      </div>
+    </div>
+
+    ${mode === 'system' ? `
+      <div class="set-note">Pick the pair. ROOT switches between them when the device does.</div>
+      <div class="opt-set"><label class="lbl">Dark half</label>
+        <div class="chips">${Prefs.THEMES.filter(t => t.group === 'dark').map(t =>
+          `<button class="chip${Prefs.get('themeDark') === t.id ? ' on' : ''}" data-pref="themeDark" data-val="${t.id}">${esc(t.name)}</button>`).join('')}</div></div>
+      <div class="opt-set"><label class="lbl">Light half</label>
+        <div class="chips">${Prefs.THEMES.filter(t => t.group === 'light').map(t =>
+          `<button class="chip${Prefs.get('themeLight') === t.id ? ' on' : ''}" data-pref="themeLight" data-val="${t.id}">${esc(t.name)}</button>`).join('')}</div></div>
+    ` : `
+      <div class="set-note">A theme sets more than colour — it also picks the corner
+        radius, the depth, the texture and the type pairing. Every one of those
+        stays yours to override under <strong>layout</strong>.</div>
+      <div class="theme-grid">${themeCards('dark')}</div>
+      <div class="sec"><span>Light themes</span></div>
+      <div class="theme-grid">${themeCards('light')}</div>
+    `}
+
+    ${sectionHead('Accent')}
+    <div class="acc-grid">
+      ${Prefs.ACCENTS.map(a => `
+        <button class="acc-b${acc === a.id ? ' on' : ''}${a.id === 'preset' ? ' theme-acc' : ''}"
+                data-pref="accent" data-val="${a.id}" title="${esc(a.name)}" aria-label="${esc(a.name)}">
+          <i${a.hex ? ` style="background:${a.hex}"` : ''}></i></button>`).join('')}
+      <button class="acc-b${acc === 'custom' ? ' on' : ''}" data-pref="accent" data-val="custom"
+              title="custom" aria-label="custom accent">
+        <i style="background:conic-gradient(#e06060,#e8a33d,#5cdb7d,#5ad4e6,#7c8cff,#ff4ecd,#e06060)"></i></button>
+    </div>
+    ${acc === 'custom' ? `
+      <div class="acc-custom-row">
+        <input type="color" id="acc-color" value="${custom}" aria-label="accent colour">
+        <input type="text" id="acc-hex" value="${custom}" spellcheck="false" autocapitalize="off"
+               placeholder="#A78BFA" aria-label="accent hex">
+      </div>` : ''}
+
+    ${sectionHead('Type')}
+    <div class="opt-set">
+      <label class="lbl">Display face<em>${esc(Prefs.resolvedDisplay().name)}</em></label>
+      <div class="chips">
+        <button class="chip${Prefs.get('displayFont') === 'auto' ? ' on' : ''}" data-pref="displayFont" data-val="auto">auto</button>
+        ${Prefs.DISPLAY_FONTS.map(f =>
+          `<button class="chip${Prefs.get('displayFont') === f.id ? ' on' : ''}" data-pref="displayFont" data-val="${f.id}">${esc(f.name)}</button>`).join('')}
+      </div>
+    </div>
+    <div class="opt-set">
+      <label class="lbl">Mono face<em>${esc(Prefs.resolvedMono().name)}</em></label>
+      <div class="chips">
+        <button class="chip${Prefs.get('monoFont') === 'auto' ? ' on' : ''}" data-pref="monoFont" data-val="auto">auto</button>
+        ${Prefs.MONO_FONTS.map(f =>
+          `<button class="chip${Prefs.get('monoFont') === f.id ? ' on' : ''}" data-pref="monoFont" data-val="${f.id}">${esc(f.name)}</button>`).join('')}
+      </div>
+    </div>
+    <div class="set-note">Body copy, the .md previews and every number stay in the
+      mono face — the exports are whitespace-significant and come apart in a
+      proportional one.</div>
+    ${toggle('caps', 'Uppercase labels', 'off shows every label as it was written')}
+    ${toggle('monoNumbers', 'Tabular figures', 'counters stop shuffling width as they change')}
+  `;
+}
+
+
+
+/* LAYOUT */
+
+function layoutHTML() {
+  const pct = v => Math.round(v * 100) + '%';
+  return previewHTML() + `
+
+    ${sectionHead('Shape')}
+    ${slider('radius', 'Corner radius')}
+    <div class="chips" style="margin:-6px 0 16px">
+      <button class="chip" data-preset-shape="0">sharp</button>
+      <button class="chip" data-preset-shape="4">soft</button>
+      <button class="chip" data-preset-shape="12">round</button>
+      <button class="chip" data-preset-shape="20">pill</button>
+      <button class="chip" data-pref-null="radius">auto</button>
+    </div>
+    ${slider('border', 'Border weight')}
+    <div class="chips" style="margin:-6px 0 16px">
+      <button class="chip" data-preset-border="0">none</button>
+      <button class="chip" data-preset-border="1">hairline</button>
+      <button class="chip" data-preset-border="2">heavy</button>
+      <button class="chip" data-pref-null="border">auto</button>
+    </div>
+    ${chips('cardStyle', [
+      { v:'outline', l:'outline' }, { v:'fill', l:'filled' },
+      { v:'ghost', l:'ghost' },     { v:'line', l:'rules' },
+    ], 'Surfaces', 'what a card is made of')}
+
+    ${sectionHead('Depth')}
+    ${chips('depth', [
+      { v:'auto', l:'auto' }, { v:'flat', l:'flat' }, { v:'soft', l:'soft' },
+      { v:'lift', l:'lifted' }, { v:'heavy', l:'hard' }, { v:'glow', l:'glow' },
+    ], 'Elevation', Prefs.get('depth') === 'auto' ? Prefs.character().depth : '')}
+    ${toggle('accentGlow', 'Accent halo', 'a soft bloom around anything carrying the accent')}
+
+    ${sectionHead('Density')}
+    ${slider('density', 'Spacing', v => pct(v), 'anything but 100% puts every padding on a fraction of a pixel, which softens the text inside it — the same thing the old Interface scale did')}
+    ${chips('titleSize', [
+      { v:'xs', l:'xs' }, { v:'s', l:'s' }, { v:'m', l:'m' }, { v:'l', l:'l' }, { v:'xl', l:'xl' },
+    ], 'Title size', 'the DO. LOG. PLAN. wordmarks')}
+    ${chips('bandMark', [
+      { v:'name', l:'the name' }, { v:'both', l:'icon and name' }, { v:'icon', l:'the icon' },
+    ], 'Wordmark', 'the icon is the app’s own tab glyph, in front of its name and wearing the same shadow')}
+    ${chips('hdTitleSize', [
+      { v:'xs', l:'xs' }, { v:'s', l:'s' }, { v:'m', l:'m' }, { v:'l', l:'l' }, { v:'xl', l:'xl' },
+    ], 'Sub-screen title size', 'the sticky header inside a screen — its bar grows with it')}
+    ${slider('contentWidth', 'Max content width', v => Math.round(v) + 'px',
+      'only while a wide window fills the screen — inside the frame the frame is the width')}
+    ${slider('iconStroke', 'Icon weight', v => v.toFixed(1))}
+    ${slider('bandDrop', 'Content offset', v => Math.round(v) + 'px', 'how far under the status bar every header starts — the band and every sticky sub-screen title move together')}
+
+    ${sectionHead('Texture')}
+    ${chips('texture', [
+      { v:'auto', l:'auto' }, { v:'none', l:'none' }, { v:'grain', l:'grain' },
+      { v:'scan', l:'scanlines' }, { v:'grid', l:'grid' }, { v:'dots', l:'dots' },
+    ], 'Overlay', Prefs.get('texture') === 'auto' ? Prefs.character().texture : '')}
+    ${slider('textureAmount', 'Strength', v => pct(v))}
+
+    ${sectionHead('On a wide screen')}
+    ${chips('desktopMode', [
+      { v:'frame', l:'a phone-shaped frame' }, { v:'rail', l:'fill the window' },
+    ], 'Wide windows', 'the frame pins the app to a box in the middle of the screen and keeps every phone rule — the pill stays a pill. Filling the window unrolls the pill into a side rail and lets the content spread')}
+    ${Prefs.get('desktopMode') === 'frame' ? `
+      ${slider('frameW', 'Frame width', v => Math.round(v) + 'px')}
+      ${slider('frameH', 'Frame height', v => Math.round(v) + 'px')}
+      <div class="set-note">Any size you like, capped by the window it is sitting
+        in. Past 560px wide the frame starts behaving like a wide window inside
+        itself — the grids grow columns and the text stops at
+        <em>Max content width</em> — so a big frame is roomy rather than stretched.
+        Under 560px of <em>window</em> there is nothing to centre, so the frame
+        steps aside and the app fills the screen as it does on a phone.</div>` : ''}
+
+    ${sectionHead('Navigation')}
+    ${chips('navStyle', [
+      { v:'pill', l:'floating pill' }, { v:'bar', l:'bottom bar' }, { v:'minimal', l:'hidden' },
+    ], 'Tab bar', 'in a frame it stays a pill at every size; filling the window turns it into a side rail')}
+    ${toggle('showTabLabels', 'Show tab names', 'off leaves the icons alone')}
+    ${chips('navShape', [
+      { v:'pill', l:'pill' }, { v:'round', l:'rounded' }, { v:'square', l:'square' },
+      { v:'circle', l:'circle' }, { v:'ring', l:'ring' }, { v:'under', l:'underline' },
+    ], 'Selected tab', 'the mark around the tab you are on — ring and underline leave the icon in its own colour')}
+    ${chips('navAnim', [
+      { v:'grow', l:'grow' }, { v:'pop', l:'pop' }, { v:'fade', l:'fade' },
+      { v:'rise', l:'rise' }, { v:'none', l:'none' },
+    ], 'How it arrives', 'how that mark moves into place when you change tab')}
+    ${toggle('tabAccent', 'The tab colours the app', 'the tab you are on lends its hue to the whole page — every button, chart and highlight inside it')}
+    ${toggle('colorfulTabs', 'Colour-code the tabs', 'each app keeps its own hue instead of the accent — already true of the tab you are on while the app is coloured')}
+    ${chips('tabPalette', [
+      { v:'app', l:'app' }, { v:'warm', l:'warm' }, { v:'cool', l:'cool' },
+      { v:'candy', l:'candy' }, { v:'neon', l:'neon' }, { v:'mono', l:'mono' },
+      { v:'custom', l:'custom' },
+    ], 'Tab palette', 'which set of hues those are')}
+    ${Prefs.get('tabPalette') === 'custom' ? `
+      <div class="set-note">One colour per tab, yours to pick. A tab you leave
+        alone keeps the hue it ships with, so a new app arrives coloured.</div>
+      ${tabColorRows()}
+      <div class="setting-row">
+        <span class="setting-lbl">Start again<small>every tab back to its shipped hue</small></span>
+        <button class="setting-btn" data-act="reset-tab-colors">reset</button>
+      </div>` : ''}
+    ${slider('navHeight', 'Bar height', v => Math.round(v) + 'px')}
+    ${slider('navRadius', 'Bar corners', v => (v >= 34 ? 'pill' : Math.round(v) + 'px'),
+      'a radius, so the pill is just its tallest setting — 0 is a square bar')}
+    ${slider('navIcon', 'Tab icon size', v => Math.round(v) + 'px')}
+    ${slider('chromeAlpha', 'Chrome opacity', v => pct(v))}
+    ${toggle('chromeBlur', 'Blur behind the bar', 'off is flatter, and cheaper on a tired phone')}
+    ${toggle('autoHideChrome', 'Get out of the way', 'the bar steps aside while you scroll down')}
+
+    ${sectionHead('Apps in the bar')}
+    <div class="set-note">Which apps get a tab, and in what order. An app switched
+      off keeps its data and its settings panel, and opens from the settings
+      home — it just has no tab. Settings is always last. The pill never grows
+      past its phone width, so the arrows stay where they are.</div>
+    ${appsList()}
+
+    ${sectionHead('Motion & contrast')}
+    ${chips('motion', [{ v:'full', l:'full' }, { v:'reduced', l:'reduced' }, { v:'none', l:'none' }],
+      'Animation', 'the OS setting still wins when it asks for less')}
+    ${slider('motionSpeed', 'Animation speed', v => v.toFixed(1) + '×')}
+    ${toggle('navMotion', 'Keep the bar moving',
+      'the tab pill still grows into place at Motion: none — the one confirmation that a tap landed')}
+    ${chips('contrast', [{ v:'normal', l:'normal' }, { v:'more', l:'more' }, { v:'max', l:'maximum' }],
+      'Contrast', 'lifts muted text and hardens hairlines')}
+    ${chips('accentUse', [{ v:'subtle', l:'subtle' }, { v:'normal', l:'normal' }, { v:'loud', l:'loud' }],
+      'Accent intensity', 'how strongly the accent washes a surface')}
+
+    <div class="sec"><span>Reset</span></div>
+    <button class="btn btn-2" data-act="reset-appearance">reset appearance to defaults</button>
+  `;
+}
+
+
+/* The app list: the enabled apps in their order, then the disabled ones. Each
+   row has up/down and a switch; the shell rebuilds the track on every change. */
+function appsList() {
+  const on = Prefs.get('apps');
+  const order = on.concat(Prefs.APPS.filter(a => !on.includes(a)));
+  return order.map((a, i) => {
+    const active = on.includes(a);
+    return `<div class="setting-row app-row${active ? '' : ' off'}" data-app-row="${a}">
+      <span class="setting-lbl">${esc(APP_NAMES[a] || a)}<small>${esc(APP_HINTS[a] || '')}</small></span>
+      <span class="app-acts">
+        <button class="setting-btn" data-app-move="${a}:-1" aria-label="move ${esc(APP_NAMES[a] || a)} up"${!active || i === 0 ? ' disabled' : ''}>↑</button>
+        <button class="setting-btn" data-app-move="${a}:1" aria-label="move ${esc(APP_NAMES[a] || a)} down"${!active || i >= on.length - 1 ? ' disabled' : ''}>↓</button>
+        <button class="tog${active ? ' on' : ''}" data-app-toggle="${a}" role="switch" aria-checked="${active}" aria-label="show ${esc(APP_NAMES[a] || a)}"></button>
+      </span></div>`;
+  }).join('');
+}
+
+
+/* The custom tab palette: one swatch per tab, settings included.
+   The value shown for a tab nobody has picked is read back off the document
+   rather than kept in a second table here — `custom` matches no palette block,
+   so what the element resolves is exactly the shipped hue, and the swatch opens
+   on the colour the tab is actually wearing. */
+function tabColorRows() {
+  const cs  = getComputedStyle(document.documentElement);
+  const set = Prefs.get('tabColors') || {};
+  return Prefs.TAB_IDS.map(a => {
+    const cur = Prefs.normHex(set[a] || cs.getPropertyValue(Prefs.tabVar(a)).trim());
+    const nm  = APP_NAMES[a] || 'SETTINGS';
+    return `<div class="setting-row">
+      <span class="setting-lbl">${esc(nm)}${set[a] ? '' : '<small>as it ships</small>'}</span>
+      <input type="color" class="ed-swatch" data-tab-color="${a}" value="${esc(cur)}"
+             aria-label="${esc(nm)} tab colour">
+    </div>`;
+  }).join('');
+}
+
+/* Sound: the kit, then the map
+   Two controls under the volume slider, and the order matters. The **kit** is
+   the one most people will ever touch: five voices picked to go together, one
+   tap. The **map** underneath is the escape hatch — one row per moment, each
+   sitting on `auto` (meaning "whatever the kit says") until it is moved.
+
+   Every chip in both plays its own sound as it is picked, because a list of
+   words like "thunk" and "glass" is not a thing anyone can choose from by
+   reading. `Prefs.sound()` accepts a raw voice id for exactly this: the
+   preview wants to play *that* voice, not whatever the map currently points
+   at. It is a no-op while sound is off, and the two controls say so.
+
+   Prefs.set() already re-renders the panel, so nothing here has to. */
+function soundKitHTML() {
+  const on = !!Prefs.get('sounds');
+  const cur = Prefs.get('soundKit');
+  return `<div class="opt-set${on ? '' : ' is-off'}">
+    <label class="lbl">Sound kit<em>${on ? 'five voices that go together — a chip plays as you pick it'
+                                          : 'switch interface sounds on to hear these'}</em></label>
+    <div class="chips">${Prefs.SOUND_KIT_IDS.map(id =>
+      `<button class="chip${id === cur ? ' on' : ''}" data-snd-kit="${esc(id)}">${esc(id)}</button>`).join('')}</div>
+  </div>`;
+}
+
+function soundMapHTML() {
+  const kit = Prefs.SOUND_KITS[Prefs.get('soundKit')] || {};
+  const opts = ['auto'].concat(Prefs.VOICE_IDS);
+  return `<div class="snd-map">${Prefs.SOUND_EVENTS.map(ev => {
+    const key = 'snd' + ev.k.charAt(0).toUpperCase() + ev.k.slice(1);
+    const cur = Prefs.get(key);
+    return `<div class="opt-set">
+      <label class="lbl">${esc(ev.label)}<em>${esc(ev.hint)}</em></label>
+      <div class="chips">${opts.map(v => {
+        const label = v === 'auto' ? 'kit · ' + (kit[ev.k] || '—') : v;
+        return `<button class="chip${v === cur ? ' on' : ''}" data-snd-map="${esc(key)}"
+                        data-snd-voice="${esc(v === 'auto' ? (kit[ev.k] || 'none') : v)}"
+                        data-val="${esc(v)}">${esc(label)}</button>`;
+      }).join('')}</div></div>`;
+  }).join('')}</div>`;
+}
+
+/* The five rebindable keys. Each row captures the next key pressed rather than
+   taking typed text: a binding is a key, and asking someone to spell "arrowup"
+   into a text field is asking them to know what the browser calls it. The
+   capture reads e.key, which is the layout's own character, so a comma is a
+   comma on every keyboard that has one somewhere. */
+/* The five in the middle are the ones a hand sits on, so they are grouped
+   together and offered as one capture — see setAllKeys(). */
+const KEY_ROWS = [
+  { k:'up',    label:'Cursor up',    hint:'moves to whatever is actually above it, not to the next one in the markup' },
+  { k:'left',  label:'Cursor left',  hint:'along a row of chips, or to the tile beside this one' },
+  { k:'right', label:'Cursor right', hint:'the four arrow keys always do these too' },
+  { k:'down',  label:'Cursor down',  hint:'and down falls back to the next control when nothing is below' },
+  { k:'act',   label:'Use it',       hint:'ticks a box, presses a button, steps into a field — and into a block, so this key alone gets you anywhere' },
+  { k:'out',   label:'Back out to the blocks', hint:'Escape does this too, so the way back is never unbound' },
+  { k:'in',    label:'Step into a block',    hint:'optional — the act key already does it' },
+  { k:'prev',  label:'Previous tab',  hint:'1–9 jump straight to one' },
+  { k:'next',  label:'Next tab',      hint:'' },
+];
+
+const KEY_SHOWN = { ' ': 'space', ',': 'comma', '.': 'period', '/': 'slash' };
+const keyLabel = v => v === '' ? 'none' : (KEY_SHOWN[v] || v);
+
+function keyMapHTML() {
+  const map = Prefs.get('keyMap') || {};
+  return `${chips('kbMark', [
+      { v:'glow', l:'lift' }, { v:'arrow', l:'corner arrow' },
+      { v:'bar', l:'edge bar' }, { v:'spotlight', l:'spotlight' },
+    ], 'What the cursor looks like', 'a lift off the page, a mark at the corner, a bar down the edge, or everything else going dark')}
+    <div class="setting-row">
+      <span class="setting-lbl">Set the five under one hand<small>press up, left, right, down and use — in that order — and it binds them as you go</small></span>
+      <button class="setting-btn" data-act="set-keys">set them</button>
+    </div>
+    <div class="key-map">${KEY_ROWS.map(r => `
+    <div class="setting-row">
+      <span class="setting-lbl">${esc(r.label)}<small>${esc(r.hint)}</small></span>
+      <button class="setting-btn key-cap" data-key-cap="${esc(r.k)}"
+              aria-label="${esc(r.label)} — press to rebind">${esc(keyLabel(map[r.k] ?? ''))}</button>
+    </div>`).join('')}
+    <div class="setting-row">
+      <span class="setting-lbl">Start again<small>back to a, e, comma, o and space</small></span>
+      <button class="setting-btn" data-act="reset-keymap">reset</button>
+    </div>
+  </div>`;
+}
+
+/* Binding the five that matter, in one pass.
+   "Let me use the app with one hand" is a question about *where the keys are*,
+   and the answer cannot be guessed from here — the defaults are already a guess
+   about one layout and this install may not be on it. So rather than shipping
+   another guess, this asks: put a hand down, press the four directions and the
+   use key, and each one is taken as it comes. Whatever is comfortable is what
+   gets bound, on any keyboard, in any layout. */
+const SET_ALL = [
+  { k:'up',    say:'press the key for UP' },
+  { k:'left',  say:'now LEFT' },
+  { k:'right', say:'now RIGHT' },
+  { k:'down',  say:'now DOWN' },
+  { k:'act',   say:'and the one that USES what is selected' },
+];
+function setAllKeys(btn) {
+  if (capturing) capturing();
+  let at = 0;
+  const map = Object.assign({}, Prefs.get('keyMap'));
+  const was = btn.textContent;
+  btn.classList.add('on');
+  const say = () => { btn.textContent = SET_ALL[at] ? SET_ALL[at].say : was; };
+  say();
+  const done = ok => {
+    document.removeEventListener('keydown', onKey, true);
+    capturing = null;
+    btn.classList.remove('on');
+    btn.textContent = was;
+    if (ok) keepScroll(() => { Prefs.set('keyMap', map); Prefs.tap(); renderBehave(); });
+  };
+  function onKey(e) {
+    e.preventDefault(); e.stopPropagation();
+    if (e.key === 'Escape') { done(false); return; }
+    const v = e.key.toLowerCase();
+    /* A key cannot be two of these at once, so anything it was doing is
+       dropped as it is taken. */
+    Object.keys(map).forEach(k => { if (map[k] === v) map[k] = ''; });
+    map[SET_ALL[at].k] = v;
+    at++;
+    if (at >= SET_ALL.length) { done(true); Shell.toast('bound to your hand'); return; }
+    say();
+  }
+  capturing = done;
+  document.addEventListener('keydown', onKey, true);
+}
+
+/* Reads the next key pressed and binds it. Capture phase and stopPropagation,
+   because the whole point is to catch keys the shell itself binds — without it,
+   rebinding anything onto "e" would change tab while you were choosing it.
+   Escape cancels, backspace unbinds. */
+let capturing = null;
+function captureKey(btn) {
+  if (capturing) capturing();                 // a second press moves the capture
+  const action = btn.dataset.keyCap;
+  const was = btn.textContent;
+  btn.classList.add('on');
+  btn.textContent = 'press a key';
+
+  const done = () => {
+    document.removeEventListener('keydown', onKey, true);
+    capturing = null;
+    btn.classList.remove('on');
+    btn.textContent = was;
+  };
+  function onKey(e) {
+    e.preventDefault(); e.stopPropagation();
+    done();
+    if (e.key === 'Escape') return;
+    const map = Object.assign({}, Prefs.get('keyMap'));
+    /* A key already bound to another action is taken off it: two actions on one
+       key means the first one in the list wins and the second silently does
+       nothing, which reads as a broken setting rather than a choice. */
+    const v = (e.key === 'Backspace' || e.key === 'Delete') ? '' : e.key.toLowerCase();
+    if (v) Object.keys(map).forEach(k => { if (map[k] === v) map[k] = ''; });
+    map[action] = v;
+    keepScroll(() => { Prefs.set('keyMap', map); Prefs.tap(); renderBehave(); });
+  }
+  capturing = done;
+  document.addEventListener('keydown', onKey, true);
+}
+
+/* BEHAVE */
+
+function behaveHTML() {
+  return `
+    ${sectionHead('Opening')}
+    ${chips('startTab', [
+      { v:'last', l:'where I left off' },
+      ...Prefs.get('apps').map(a => ({ v:a, l:(APP_NAMES[a] || a).toLowerCase() })),
+      { v:'settings', l:'settings' },
+    ], 'Start on')}
+
+    ${sectionHead('Guidance')}
+    ${toggle('tips', 'Explain the controls',
+      'the paragraph over a section and the grey line under a switch — off halves the length of every panel')}
+
+    ${sectionHead('Gestures')}
+    ${toggle('swipe', 'Swipe between tabs', 'a drag inside a text field always belongs to the field')}
+    ${slider('swipeStrength', 'Swipe commitment', v => Math.round(v * 100) + '% of the width')}
+    ${toggle('keyboardNav', 'Keyboard shortcuts', '← → between tabs, 1–9 to jump, / to search, and the seven below')}
+    ${Prefs.get('keyboardNav') ? `<div class="set-note">The cursor walks in two
+      levels: the <em>blocks</em> of a screen first, then the controls inside
+      whichever block you step into. On a dense screen that is six steps to the
+      thing you want rather than forty.</div>` : ''}
+    ${Prefs.get('keyboardNav') ? keyMapHTML() : ''}
+    ${toggle('lockPortrait', 'Stay in portrait', 'a phone turned sideways shows a curtain until it is turned back — iOS cannot lock the rotation itself')}
+    ${toggle('haptics', 'Haptic feedback', 'Android only — iOS browsers do not expose the vibration API')}
+    ${toggle('sounds', 'Interface sounds', 'a very quiet click under a control, a note when a tab arrives and another when a message shows — synthesised, nothing is downloaded')}
+    ${slider('soundLevel', 'How loud', v => Math.round(v * 100) + '%')}
+    ${soundKitHTML()}
+    ${soundMapHTML()}
+
+    ${sectionHead('Typing')}
+    ${chips('numpad', [
+      { v:'auto',   l:'on a touch screen' },
+      { v:'always', l:'always' },
+      { v:'off',    l:'never' },
+    ], 'In-app numpad', 'a field that only takes a number gets ROOT’s own pad instead of the system keyboard — sleep reads 720 as 7h20m, an alert hour reads 930 as 09:30')}
+
+    ${sectionHead('Safety')}
+    ${toggle('confirmDestructive', 'Confirm before clearing', 'off makes reset and clear buttons act immediately')}
+    ${slider('toastMs', 'Toast duration', v => (v / 1000).toFixed(1) + 's')}
+    ${slider('undoSec', 'Undo window', v => (+v ? v + 's' : 'until you tap it'))}
+    ${chips('undoIcon', [
+      { v:'undo', l:'hook' }, { v:'undo-round', l:'circle' }, { v:'back', l:'arrow' },
+      { v:'chev-l', l:'chevron' }, { v:'none', l:'none' },
+    ], 'Undo mark', 'the glyph on the pill')}
+    ${toggle('undoText', 'Say what was cleared', 'off leaves the mark alone — unless there is no mark either, in which case the words come back')}
+    <div class="set-note">Clearing a list, a queue, a day or a counter offers the way back instead of a toast. Nothing else is undoable — a delete still asks first.</div>
+
+    ${sectionHead('Formats')}
+    ${chips('dateFormat', [
+      { v:'long', l:'Monday, 1 September 2026' },
+      { v:'short', l:'Mon 1 Sep' },
+      { v:'iso', l:'2026-09-01' },
+    ], 'Dates')}
+    ${chips('weekStart', [{ v:'mon', l:'Monday' }, { v:'sun', l:'Sunday' }], 'Week starts on',
+      'the km chart — reports keep ISO weeks, which start on Monday')}
+    <div class="f">
+      <label class="lbl">Currency symbol</label>
+      <input type="text" id="cur-sym" value="${esc(Prefs.get('currency'))}" maxlength="3"
+             spellcheck="false" aria-label="currency symbol">
+    </div>
+    <div class="set-note">Used by STORE's counter, its numpad and every saved trip.</div>
+
+    <div class="sec"><span>Reset</span></div>
+    <button class="btn btn-2" data-act="reset-behaviour">reset behaviour to defaults</button>
+  `;
+}
+
+
+/* CONTENT
+   Editors for everything Config holds. Each group declares how it renders and
+   how it reads itself back; the delegated listener does the rest. */
+
+const textareaOf = (rows, ph) =>
+  `<textarea data-field="items" rows="${rows}" placeholder="${esc(ph)}" spellcheck="false"></textarea>`;
+
+const EDITORS = {
+
+  /* DO · routines */
+  'do.routines': {
+    title: 'Daily routines',
+    note: 'One checklist per card, one item per line. The glyphs are ordinary characters — paste whatever you like.',
+    render() {
+      const routines = Config.get('do.routines');
+      const tabs = Config.get('do.tabs');
+      const tabOf = id => (tabs.find(t => t.routines.includes(id)) || tabs[0] || {}).id;
+      return Object.keys(routines).map(key => {
+        const r = routines[key];
+        return `<div class="ed-card" data-key="${esc(key)}">
+          <div class="ed-head">
+            <input type="text" data-field="label" value="${esc(r.label)}" placeholder="name" aria-label="routine name">
+            <select data-field="tab" aria-label="tab">${tabs.map(t =>
+              `<option value="${esc(t.id)}"${tabOf(key) === t.id ? ' selected' : ''}>${esc(t.label)}</option>`).join('')}</select>
+            <button class="ed-del" data-del="${esc(key)}" aria-label="delete routine">×</button>
+          </div>
+          <textarea data-field="items" rows="${Math.min(12, Math.max(3, r.items.length))}"
+                    spellcheck="false" aria-label="items">${esc(r.items.join('\n'))}</textarea>
+        </div>`;
+      }).join('') + `<button class="ed-add" data-add="1">+ add a routine</button>`;
+    },
+    read(box) {
+      const routines = {}, byTab = {};
+      box.querySelectorAll('.ed-card').forEach(card => {
+        const key = card.dataset.key;
+        routines[key] = {
+          label: card.querySelector('[data-field=label]').value.trim() || key,
+          items: lines(card.querySelector('[data-field=items]').value),
+        };
+        const tab = card.querySelector('[data-field=tab]').value;
+        (byTab[tab] = byTab[tab] || []).push(key);
+      });
+      Config.set('do.routines', routines);
+      Config.set('do.tabs', Config.get('do.tabs').map(t =>
+        Object.assign({}, t, { routines: byTab[t.id] || [] })));
+    },
+    add() {
+      const r = Config.get('do.routines');
+      r[uniqueKey('routine', Object.keys(r))] = { label: 'New routine', items: ['first item'] };
+      Config.set('do.routines', r);
+    },
+    del(key) {
+      const r = Config.get('do.routines');
+      delete r[key];
+      Config.set('do.routines', r);
+      Config.set('do.tabs', Config.get('do.tabs').map(t =>
+        Object.assign({}, t, { routines: t.routines.filter(x => x !== key) })));
+    },
+  },
+
+  /* DO · media labels */
+  'do.mediaLabels': {
+    title: 'Media labels',
+    note: 'The Todoist labels the media tab fetches, in the order its groups are drawn. Each group takes the label\'s own Todoist colour; any second label on a task shows on its tile.',
+    render() {
+      return `<div class="f">
+        <label class="lbl">Labels <em>comma separated, without the @</em></label>
+        <input type="text" data-cfg="do.mediaLabels" data-list="1" value="${esc(Config.get('do.mediaLabels').join(', '))}">
+      </div>`;
+    },
+    read() {},
+  },
+
+  /* DO · packing categories */
+  'do.travelCategories': {
+    title: 'Packing categories',
+    note: 'The master lists a new travel checklist is built from. Every item starts as a counter at 1.',
+    render() {
+      const cats = Config.get('do.travelCategories');
+      const order = Config.get('do.categoryOrder').filter(k => cats[k])
+        .concat(Object.keys(cats).filter(k => !Config.get('do.categoryOrder').includes(k)));
+      return order.map(key => `
+        <div class="ed-card" data-key="${esc(key)}">
+          <div class="ed-head">
+            <input type="text" data-field="label" value="${esc(key)}" placeholder="category" aria-label="category name">
+            <span class="ed-badge">${cats[key].length} items</span>
+            <button class="ed-del" data-del="${esc(key)}" aria-label="delete category">×</button>
+          </div>
+          <textarea data-field="items" rows="5" spellcheck="false" aria-label="items">${esc(cats[key].join('\n'))}</textarea>
+        </div>`).join('') + `<button class="ed-add" data-add="1">+ add a category</button>`;
+    },
+    read(box) {
+      const cats = {}, order = [];
+      box.querySelectorAll('.ed-card').forEach(card => {
+        const name = slug(card.querySelector('[data-field=label]').value) || card.dataset.key;
+        cats[name] = lines(card.querySelector('[data-field=items]').value);
+        order.push(name);
+      });
+      Config.set('do.travelCategories', cats);
+      Config.set('do.categoryOrder', order);
+    },
+    add() {
+      const c = Config.get('do.travelCategories');
+      const k = uniqueKey('category', Object.keys(c));
+      c[k] = [];
+      Config.set('do.travelCategories', c);
+      Config.set('do.categoryOrder', Config.get('do.categoryOrder').concat(k));
+    },
+    del(key) {
+      const c = Config.get('do.travelCategories');
+      delete c[key];
+      Config.set('do.travelCategories', c);
+      Config.set('do.categoryOrder', Config.get('do.categoryOrder').filter(x => x !== key));
+    },
+  },
+
+  /* LOG · blocks */
+  'log.blocks': {
+    title: 'Focus blocks',
+    note: 'The buttons on the evening form. Their names are what the exported .md records, so renaming one starts a new series in your history.',
+    render() {
+      const blocks = Config.get('log.blocks');
+      return `<div class="ed-card">
+        <div class="ed-head">
+          <span class="setting-lbl" style="flex:1">Most blocks per day</span>
+          <input type="number" data-field="max" min="1" max="12" value="${Config.get('log.maxBlocks')}" aria-label="max blocks">
+        </div>
+      </div>` + blocks.map((b, i) => `
+        <div class="ed-card" data-key="${i}">
+          <div class="ed-head">
+            <input type="text" data-field="name" value="${esc(b.name)}" placeholder="block name" aria-label="block name">
+            <input type="color" class="ed-swatch" data-field="color" value="${esc(b.color)}" aria-label="block colour">
+            <button class="ed-del" data-del="${i}" aria-label="delete block">×</button>
+          </div>
+        </div>`).join('') + `<button class="ed-add" data-add="1">+ add a block</button>`;
+    },
+    read(box) {
+      const max = box.querySelector('[data-field=max]');
+      if (max) Config.set('log.maxBlocks', Math.max(1, Math.min(12, parseInt(max.value, 10) || 6)));
+      const out = [];
+      box.querySelectorAll('.ed-card[data-key]').forEach(card => {
+        const name = card.querySelector('[data-field=name]').value.trim();
+        if (name) out.push({ name, color: card.querySelector('[data-field=color]').value });
+      });
+      Config.set('log.blocks', out);
+    },
+    add()      { Config.set('log.blocks', Config.get('log.blocks').concat({ name:'new block', color:'#9a9a9a' })); },
+    del(idx)   { Config.set('log.blocks', Config.get('log.blocks').filter((_, i) => i !== +idx)); },
+  },
+
+  /* LOG · labels */
+  'log.labels': {
+    title: 'Names and counts',
+    paths: ['log.meds','log.medsOn','log.mealCount','log.mealLabel','log.caffeine','log.curate','log.scales','log.workouts',
+            'log.kmTarget','log.streakRequires'],
+    note: 'What the forms call things, plus the walking target and the streak rule. The underlying field names in the exported .md never change, so your Obsidian notes stay parseable.',
+    render() {
+      // read through the shipped record: an override written before a slot
+      // existed has no answer for it, and a missing key is "not asked", not "gone"
+      const meds = Object.assign({}, Config.defaults('log.meds'), Config.get('log.meds') || {});
+      const medsOn = Object.assign({}, Config.defaults('log.medsOn'), Config.get('log.medsOn') || {});
+      const caf = Config.get('log.caffeine');
+      const cur  = Config.get('log.curate'), sc = Config.get('log.scales');
+      const pair = (path, a, b, la, lb) => `<div class="ed-pair">
+        <div><label class="lbl">${esc(la)}</label><input type="text" data-cfg="${path}" data-sub="${a.k}" value="${esc(a.v)}"></div>
+        <div><label class="lbl">${esc(lb)}</label><input type="text" data-cfg="${path}" data-sub="${b.k}" value="${esc(b.v)}"></div>
+      </div>`;
+      return `
+        <label class="lbl">Medication slots<em>a slot switched off stops being asked about. The record and the exported .md keep every slot either way — nothing is deleted.</em></label>
+        <div class="ed-grid">${Object.keys(meds).map((k, i) => `
+          <div><label class="lbl">slot ${i + 1}</label>
+            <input type="text" data-cfg="log.meds" data-sub="${esc(k)}" value="${esc(meds[k])}"></div>`).join('')}</div>
+        <div class="ed-grid">${Object.keys(meds).map(k => `
+          <div class="ed-toggle"><span>${esc(meds[k])}</span>
+            <button class="tog${medsOn[k] !== false ? ' on' : ''}" data-cfg-toggle="log.medsOn.${esc(k)}"
+                    role="switch" aria-checked="${medsOn[k] !== false}" aria-label="${esc(meds[k])} on the form"></button>
+          </div>`).join('')}</div>
+
+        <label class="lbl">Caffeine counters</label>
+        ${pair('log.caffeine', {k:'c',v:caf.c}, {k:'ed',v:caf.ed}, 'counter 1', 'counter 2')}
+
+        <label class="lbl">Meals</label>
+        <div class="ed-pair">
+          <div><label class="lbl">how many</label>
+            <input type="number" min="1" max="8" data-cfg="log.mealCount" value="${Config.get('log.mealCount')}"></div>
+          <div><label class="lbl">called</label>
+            <input type="text" data-cfg="log.mealLabel" value="${esc(Config.get('log.mealLabel'))}"></div>
+        </div>
+
+        <label class="lbl">Curate counters</label>
+        ${Object.keys(cur).map(k => `<div class="ed-card">
+          <div class="ed-head">
+            <input type="text" data-cfg="log.curate" data-sub="${k}.label" value="${esc(cur[k].label)}" aria-label="${k} label">
+            <input type="color" class="ed-swatch" data-cfg="log.curate" data-sub="${k}.color" value="${esc(cur[k].color)}" aria-label="${k} colour">
+          </div></div>`).join('')}
+
+        <label class="lbl">Scale endpoints</label>
+        ${Object.keys(sc).map(k => `<div class="ed-card">
+          <div class="ed-head">
+            <span class="ed-badge">${esc(k)}</span>
+            <input type="text" data-cfg="log.scales" data-sub="${k}.low"  value="${esc(sc[k].low)}"  aria-label="${k} low">
+            <input type="text" data-cfg="log.scales" data-sub="${k}.high" value="${esc(sc[k].high)}" aria-label="${k} high">
+          </div></div>`).join('')}
+
+        <div class="f" style="margin-top:14px">
+          <label class="lbl">Workout types <em>comma separated</em></label>
+          <input type="text" data-cfg="log.workouts" data-list="1" value="${esc(Config.get('log.workouts').join(', '))}">
+        </div>
+
+        <label class="lbl">Walking and streak</label>
+        <div class="ed-pair">
+          <div><label class="lbl">km target per day</label>
+            <input type="number" inputmode="decimal" min="0.5" max="50" step="0.5" data-cfg="log.kmTarget"
+                   value="${esc(Config.get('log.kmTarget'))}"></div>
+          <div><label class="lbl">a day counts when</label>
+            <select data-cfg="log.streakRequires" aria-label="streak rule">${[
+              ['both', 'morning + evening'], ['morning', 'morning logged'], ['evening', 'evening logged'],
+            ].map(([v, l]) => `<option value="${v}"${Config.get('log.streakRequires') === v ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
+        </div>`;
+    },
+    read() { /* per-field, handled by the data-cfg listener */ },
+  },
+
+  /* LOG · fields */
+  'log.fields': {
+    title: 'Which fields appear',
+    note: 'Turning a field off hides it from the form. Anything already recorded is kept and still exports — nothing is deleted.',
+    render() {
+      const f = Config.get('log.fields');
+      const NAMES = {
+        wakeTime:'wake time', sleepHours:'sleep hours', energyM:'energy (am)', moodM:'mood (am)',
+        coldShower:'cold shower', weight:'weight', kmMorning:'km (am)', workout:'workout',
+        kmEvening:'km (pm)', energyE:'energy (pm)', moodE:'mood (pm)', stress:'stress',
+        meds:'meds', meals:'meals', caffeine:'caffeine', blocks:'blocks', curate:'curate output',
+      };
+      return `<div class="ed-grid">${Object.keys(NAMES).map(k => `
+        <div class="ed-toggle"><span>${esc(NAMES[k])}</span>
+          <button class="tog${f[k] ? ' on' : ''}" data-cfg-toggle="log.fields.${k}"
+                  role="switch" aria-checked="${!!f[k]}" aria-label="${esc(NAMES[k])}"></button>
+        </div>`).join('')}</div>`;
+    },
+    read() {},
+  },
+
+  /* PLAN · projects */
+  'plan.types': {
+    title: 'Projects and sections',
+    note: 'One tile per project. Each line in the box is a section: what you see, then a pipe, then the Todoist section name it files under.',
+    render() {
+      return Config.get('plan.types').map((t, i) => `
+        <div class="ed-card" data-key="${i}">
+          <div class="ed-head">
+            <input type="text" data-field="label" value="${esc(t.label)}" placeholder="project" aria-label="project name">
+            <input type="color" class="ed-swatch" data-field="color" value="${esc(t.color)}" aria-label="project colour">
+            <button class="ed-del" data-del="${i}" aria-label="delete project">×</button>
+          </div>
+          <textarea data-field="subs" rows="${Math.min(10, Math.max(2, t.subs.length))}" spellcheck="false"
+                    aria-label="sections">${esc(t.subs.map(s => s.display === s.section ? s.display : s.display + ' | ' + s.section).join('\n'))}</textarea>
+          <div class="ed-hint">display name | todoist section — omit the pipe when they match</div>
+        </div>`).join('') + `<button class="ed-add" data-add="1">+ add a project</button>`;
+    },
+    read(box) {
+      const prev = Config.get('plan.types');
+      const out = [];
+      box.querySelectorAll('.ed-card').forEach(card => {
+        const i = +card.dataset.key;
+        const label = card.querySelector('[data-field=label]').value.trim();
+        if (!label) return;
+        out.push({
+          // keep the original key where there was one: plan_mappings is keyed by it
+          key: (prev[i] && prev[i].key) || uniqueKey(label, out.map(t => t.key)),
+          label, pLabel: label,
+          color: card.querySelector('[data-field=color]').value,
+          subs: lines(card.querySelector('[data-field=subs]').value).map(l => {
+            const [d, s] = l.split('|').map(x => x.trim());
+            return { display: d, section: s || d };
+          }),
+        });
+      });
+      Config.set('plan.types', out);
+    },
+    add() {
+      const t = Config.get('plan.types');
+      Config.set('plan.types', t.concat({
+        key: uniqueKey('project', t.map(x => x.key)), label:'new project', pLabel:'new project',
+        color:'#808080', subs:[{ display:'tasks', section:'tasks' }],
+      }));
+    },
+    del(idx) { Config.set('plan.types', Config.get('plan.types').filter((_, i) => i !== +idx)); },
+  },
+
+  /* PLAN · chips */
+  'plan.chips': {
+    title: 'Task form chips',
+    paths: ['plan.blocks','plan.times'],
+    note: 'The quick-pick rows on the new-task form.',
+    render() {
+      return `
+        <div class="f">
+          <label class="lbl">Blocks <em>comma separated</em></label>
+          <input type="text" data-cfg="plan.blocks" data-list="1" value="${esc(Config.get('plan.blocks').join(', '))}">
+        </div>
+        <div class="f">
+          <label class="lbl">Time estimates</label>
+          <textarea data-cfg="plan.times" data-pairs="label,value" rows="8" spellcheck="false"
+            >${esc(Config.get('plan.times').map(t => t.label + ' | ' + t.value).join('\n'))}</textarea>
+          <div class="ed-hint">button text | what Todoist receives</div>
+        </div>`;
+    },
+    read() {},
+  },
+
+  /* PLAN · task form */
+  'plan.formFields': {
+    title: 'Task form',
+    note: 'Which rows the task form shows when you pick a section. The task name is always there. Switching a row off leaves its chips alone — turning it back on costs nothing.',
+    render() {
+      // the shipped record fills any key an older override has no answer for,
+      // the way PLAN reads it — see formFields() in plan.js
+      const f = Object.assign({}, Config.defaults('plan.formFields'), Config.get('plan.formFields') || {});
+      const NAMES = { date:'due date', block:'block', time:'time estimate', priority:'priority', subtasks:'subtasks' };
+      return `<div class="ed-grid">${Object.keys(NAMES).map(k => `
+        <div class="ed-toggle"><span>${esc(NAMES[k])}</span>
+          <button class="tog${f[k] ? ' on' : ''}" data-cfg-toggle="plan.formFields.${k}"
+                  role="switch" aria-checked="${!!f[k]}" aria-label="${esc(NAMES[k])}"></button>
+        </div>`).join('')}</div>`;
+    },
+    read() {},
+  },
+
+  /* PLAN · queue presets */
+  'plan.presets': {
+    title: 'Queue presets',
+    note: 'A queue saved under a name on PLAN, refilled with one tap. Rename or remove one here; they are made over there, from a queue that is already built.',
+    render() {
+      const list = Config.get('plan.presets') || [];
+      if (!list.length) return `<div class="set-note">None saved yet. Build a queue on PLAN and tap “save as preset”.</div>`;
+      return list.map((p, i) => `
+        <div class="ed-card" data-key="${i}">
+          <div class="ed-head">
+            <input type="text" data-field="label" value="${esc(p.label)}" placeholder="preset" aria-label="preset name">
+            <span class="ed-badge">${(p.tasks || []).length} tasks</span>
+            <button class="ed-del" data-del="${i}" aria-label="delete preset">×</button>
+          </div>
+          <div class="ed-hint">${esc((p.tasks || []).map(t => t.name).join(' · ')) || '—'}</div>
+        </div>`).join('');
+    },
+    read(box) {
+      const prev = Config.get('plan.presets') || [];
+      const out = [];
+      box.querySelectorAll('.ed-card').forEach(card => {
+        const p = prev[+card.dataset.key];
+        if (!p) return;
+        // the key is the identity the queue chips are addressed by: never rewritten
+        out.push(Object.assign({}, p, { label: card.querySelector('[data-field=label]').value.trim() || p.label }));
+      });
+      if (out.length) Config.set('plan.presets', out);
+    },
+    del(idx) { Config.set('plan.presets', (Config.get('plan.presets') || []).filter((_, i) => i !== +idx)); },
+  },
+
+  /* PLAN · calendars */
+  'plan.calendars': {
+    title: 'Calendars',
+    note: 'Which Google Calendar each project\'s events belong on. ROOT never touches a calendar — it passes the name on in the export and the scheduled agent looks it up. One per line: the project, or "project > section" where a project splits, then a pipe, then the calendar name.',
+    render() {
+      const c = Config.get('plan.calendars') || {};
+      return `<div class="f">
+        <textarea data-cfg="plan.calendars" data-map="1" rows="${Math.min(14, Math.max(4, Object.keys(c).length))}"
+                  spellcheck="false" aria-label="project to calendar"
+          >${esc(Object.keys(c).map(k => k + ' | ' + c[k]).join('\n'))}</textarea>
+        <div class="ed-hint">project | calendar name — the first pipe divides them, so the name may hold more</div>
+      </div>`;
+    },
+    read() {},
+  },
+
+  /* PLAN · day templates */
+  'plan.dayTemplates': {
+    title: 'Day templates',
+    note: 'The shape of a day, as minutes from whatever start time the export is given — nothing here is a clock time, so one number moves the whole day. Three fields is a block slot the picked tasks are assigned to; four or more is a fixed event. "normal" and "rest" are names the export writes down, so keep them.',
+    render() {
+      const t = Config.get('plan.dayTemplates') || {};
+      return Object.keys(t).map(name => {
+        const rows = Array.isArray(t[name]) ? t[name] : [];
+        const slots = rows.filter(r => r.slot).length;
+        return `<div class="ed-card" data-key="${esc(name)}">
+          <div class="ed-head">
+            <span class="ed-badge">${esc(name)}</span>
+            <span class="ed-hint">${rows.length} rows · ${slots} block slot${slots === 1 ? '' : 's'} · ${fmtSpan(rows)}</span>
+          </div>
+          <textarea data-field="rows" rows="${Math.min(22, Math.max(4, rows.length))}" spellcheck="false"
+                    aria-label="${esc(name)} rows">${esc(rows.map(tplLine).join('\n'))}</textarea>
+        </div>`;
+      }).join('') + `<div class="ed-hint">offset | minutes | slot &nbsp;·&nbsp; or &nbsp; offset | minutes | event | calendar name</div>`;
+    },
+    read(box) {
+      const out = {};
+      box.querySelectorAll('.ed-card').forEach(card => {
+        out[card.dataset.key] = lines(card.querySelector('[data-field=rows]').value).map(tplRow).filter(Boolean);
+      });
+      Config.set('plan.dayTemplates', out);
+    },
+  },
+
+  /* STORE · categories */
+  'store.categories': {
+    title: 'Aisles',
+    note: 'Each aisle is a tile in "add items", a colour on the list, and the vocabulary the auto-categoriser matches against. The "other" aisle cannot be removed — uncategorised items land there.',
+    render() {
+      const cats = Config.get('store.categories');
+      return Object.keys(cats).map(key => {
+        const c = cats[key];
+        const locked = key === 'manual';
+        return `<div class="ed-card" data-key="${esc(key)}">
+          <div class="ed-head">
+            <input type="text" data-field="label" value="${esc(c.label)}" placeholder="aisle" aria-label="aisle name">
+            <input type="color" class="ed-swatch" data-field="color" value="${esc(c.color)}" aria-label="aisle colour">
+            <select data-field="icon" aria-label="icon">${STORE_ICONS.map(ic =>
+              `<option value="${ic}"${c.icon === ic ? ' selected' : ''}>${ic.replace('ico-','')}</option>`).join('')}</select>
+            ${locked ? '<span class="ed-badge">fixed</span>'
+                     : `<button class="ed-del" data-del="${esc(key)}" aria-label="delete aisle">×</button>`}
+          </div>
+          <textarea data-field="items" rows="4" spellcheck="false" aria-label="items">${esc(c.items.join('\n'))}</textarea>
+        </div>`;
+      }).join('') + `<button class="ed-add" data-add="1">+ add an aisle</button>`;
+    },
+    read(box) {
+      const prev = Config.get('store.categories');
+      const out = {};
+      box.querySelectorAll('.ed-card').forEach(card => {
+        const key = card.dataset.key;                       // the key is the identity, never renamed
+        out[key] = {
+          label: card.querySelector('[data-field=label]').value.trim() || key,
+          color: card.querySelector('[data-field=color]').value,
+          icon:  card.querySelector('[data-field=icon]').value,
+          items: lines(card.querySelector('[data-field=items]').value),
+        };
+      });
+      if (!out.manual) out.manual = prev.manual;            // never let the fallback aisle vanish
+      Config.set('store.categories', out);
+    },
+    add() {
+      const c = Config.get('store.categories');
+      const k = uniqueKey('aisle', Object.keys(c));
+      // insert before `manual`, which stays last
+      const out = {};
+      Object.keys(c).forEach(x => { if (x !== 'manual') out[x] = c[x]; });
+      out[k] = { label:'new aisle', color:'#8a8a8a', icon:'ico-other', items:[] };
+      out.manual = c.manual;
+      Config.set('store.categories', out);
+    },
+    del(key) {
+      if (key === 'manual') return;
+      const c = Config.get('store.categories');
+      delete c[key];
+      Config.set('store.categories', c);
+    },
+  },
+
+  /* STORE · meals */
+  'store.meals': {
+    title: 'Premade meals',
+    note: 'Tapping a meal adds its ingredients to the list. One per line: the item, a pipe, then which aisle it belongs to.',
+    render() {
+      const meals = Config.get('store.meals');
+      const cats  = Object.keys(Config.get('store.categories'));
+      return Object.keys(meals).map(key => {
+        const m = meals[key];
+        return `<div class="ed-card" data-key="${esc(key)}">
+          <div class="ed-head">
+            <input type="text" data-field="label" value="${esc(m.label)}" placeholder="meal" aria-label="meal name">
+            <span class="ed-badge">${m.items.length} items</span>
+            <button class="ed-del" data-del="${esc(key)}" aria-label="delete meal">×</button>
+          </div>
+          <textarea data-field="items" rows="${Math.min(10, Math.max(3, m.items.length))}" spellcheck="false"
+                    aria-label="ingredients">${esc(m.items.map(p => p[0] + ' | ' + p[1]).join('\n'))}</textarea>
+          <div class="ed-hint">aisles: ${esc(cats.join(', '))}</div>
+        </div>`;
+      }).join('') + `<button class="ed-add" data-add="1">+ add a meal</button>`;
+    },
+    read(box) {
+      const cats = Object.keys(Config.get('store.categories'));
+      const out = {};
+      box.querySelectorAll('.ed-card').forEach(card => {
+        const key = card.dataset.key;
+        out[key] = {
+          label: card.querySelector('[data-field=label]').value.trim() || key,
+          items: lines(card.querySelector('[data-field=items]').value).map(l => {
+            const [n, c] = l.split('|').map(x => x.trim());
+            return [n, cats.includes(c) ? c : 'manual'];
+          }).filter(p => p[0]),
+        };
+      });
+      Config.set('store.meals', out);
+    },
+    add() {
+      const m = Config.get('store.meals');
+      m[uniqueKey('meal', Object.keys(m))] = { label:'new meal', items:[] };
+      Config.set('store.meals', m);
+    },
+    del(key) { const m = Config.get('store.meals'); delete m[key]; Config.set('store.meals', m); },
+  },
+
+  /* STORE · counter */
+  'store.quickAmounts': {
+    title: 'Counter steps',
+    note: 'The +/− buttons over the in-store total, largest first.',
+    render() {
+      return `<div class="f">
+        <label class="lbl">Amounts <em>comma separated</em></label>
+        <input type="text" data-cfg="store.quickAmounts" data-numlist="1"
+               value="${esc(Config.get('store.quickAmounts').join(', '))}">
+      </div>`;
+    },
+    read() {},
+  },
+
+  /* TEND · plant types */
+  'tend.groups': {
+    title: 'Plant types',
+    note: 'How seasonal each type is: 1 stretches its watering fully with the growth curve, 0 not at all, above 1 harder still. The note shows under the type in the editor. A type in use by a plant can be renamed freely; deleting it sends the plant to the default type for its maths.',
+    render() {
+      return Config.get('tend.groups').map((g, i) => `
+        <div class="ed-card" data-key="${i}">
+          <div class="ed-head">
+            <input type="text" data-field="label" value="${esc(g.label)}" placeholder="type" aria-label="type name">
+            <input type="number" data-field="season" min="0" max="3" step="0.1" value="${esc(g.season)}" aria-label="season factor" title="season factor">
+            <button class="ed-del" data-del="${i}" aria-label="delete type">×</button>
+          </div>
+          <textarea data-field="note" rows="2" spellcheck="false" aria-label="note">${esc(g.note || '')}</textarea>
+        </div>`).join('') + `<button class="ed-add" data-add="1">+ add a type</button>`;
+    },
+    read(box) {
+      const prev = Config.get('tend.groups');
+      const out = [];
+      box.querySelectorAll('.ed-card').forEach(card => {
+        const i = +card.dataset.key;
+        const label = card.querySelector('[data-field=label]').value.trim();
+        if (!label) return;
+        out.push({
+          // the key is what each plant is filed under, so it survives a rename
+          key: (prev[i] && prev[i].key) || uniqueKey(label, out.map(g => g.key)),
+          label,
+          season: Math.max(0, Math.min(3, parseFloat(card.querySelector('[data-field=season]').value) || 0)),
+          note: card.querySelector('[data-field=note]').value.trim(),
+        });
+      });
+      if (out.length) Config.set('tend.groups', out);
+    },
+    add() {
+      const g = Config.get('tend.groups');
+      Config.set('tend.groups', g.concat({ key: uniqueKey('type', g.map(x => x.key)), label:'new type', season:1, note:'' }));
+    },
+    del(idx) {
+      const g = Config.get('tend.groups');
+      if (g.length <= 1) return;
+      Config.set('tend.groups', g.filter((_, i) => i !== +idx));
+    },
+  },
+
+  /* TEND · vocabulary + curve */
+  'tend.labels': {
+    title: 'Care vocabulary and season',
+    paths: ['tend.tasks','tend.seasons','tend.growth','tend.feedFloor'],
+    note: 'The three care tasks are fixed slots with editable names (the log is filed under water / feed / repot). The growth curve is twelve values, January to December, from 0 to 1 — watering stretches as it falls, and feeding pauses below the cut-off.',
+    render() {
+      const t = Config.get('tend.tasks');
+      const row = (k, name) => `<div class="ed-card"><div class="ed-head">
+        <span class="ed-badge">${esc(name)}</span>
+        <input type="text" data-cfg="tend.tasks" data-sub="${k}.label" value="${esc(t[k].label)}" aria-label="${k} label" placeholder="label">
+        <input type="text" data-cfg="tend.tasks" data-sub="${k}.verb"  value="${esc(t[k].verb)}"  aria-label="${k} verb" placeholder="past tense">
+      </div></div>`;
+      return row('water', 'water') + row('feed', 'feed') + row('repot', 'repot') + `
+        <div class="f" style="margin-top:14px">
+          <label class="lbl">Growth curve <em>12 values, Jan → Dec</em></label>
+          <input type="text" data-cfg="tend.growth" data-numlist="all" inputmode="decimal"
+                 value="${esc(Config.get('tend.growth').join(', '))}">
+        </div>
+        <div class="f">
+          <label class="lbl">Season names <em>12, Jan → Dec</em></label>
+          <input type="text" data-cfg="tend.seasons" data-list="1"
+                 value="${esc(Config.get('tend.seasons').join(', '))}">
+        </div>
+        <div class="f">
+          <label class="lbl">Pause feeding below <em>growth, 0–1</em></label>
+          <input type="number" min="0" max="1" step="0.05" inputmode="decimal" data-cfg="tend.feedFloor"
+                 value="${esc(Config.get('tend.feedFloor'))}">
+        </div>`;
+    },
+    read() {},
+  },
+
+  /* TRACK · labels */
+  'track.labels': {
+    title: 'Curriculum labels',
+    paths: ['track.phases','track.levelLabel','track.pse','track.revision'],
+    note: 'The names around the plan. The 54 topics themselves are not editable here — the ticks are filed under their ids, and renumbering would orphan them.',
+    render() {
+      const ph = Config.get('track.phases'), pse = Config.get('track.pse');
+      return `
+        <label class="lbl">Phases</label>
+        ${['real','mes','main'].map(k => `<div class="f"><input type="text" data-cfg="track.phases" data-sub="${k}" value="${esc(ph[k] || '')}" aria-label="phase ${k}"></div>`).join('')}
+        <div class="ed-pair">
+          <div><label class="lbl">level word</label><input type="text" data-cfg="track.levelLabel" value="${esc(Config.get('track.levelLabel'))}"></div>
+          <div><label class="lbl">separate subject</label><input type="text" data-cfg="track.pse" data-sub="label" value="${esc(pse.label)}"></div>
+        </div>
+        <div class="f"><label class="lbl">its note</label><input type="text" data-cfg="track.pse" data-sub="note" value="${esc(pse.note || '')}"></div>
+        <div class="f">
+          <label class="lbl">Revision reminders <em>one per line</em></label>
+          <textarea data-cfg="track.revision" data-lines="1" rows="4" spellcheck="false">${esc(Config.get('track.revision').join('\n'))}</textarea>
+        </div>`;
+    },
+    read() {},
+  },
+
+  /* LEARN · ratings */
+  'learn.ratings': {
+    title: 'Rating names',
+    note: 'The four buttons under a revealed card, lowest first. The fourth is the one that counts as learned; the other three are "needs work".',
+    render() {
+      return `<div class="f">
+        <label class="lbl">Ratings <em>comma separated, four of them</em></label>
+        <input type="text" data-cfg="learn.ratings" data-list="1" value="${esc(Config.get('learn.ratings').join(', '))}">
+      </div>`;
+    },
+    read() {},
+  },
+
+  /* CAL · the colours around the blocks
+     A task row is already the colour of its project — PLAN resolves that at
+     export time and it travels with the day. What is editable here is the
+     template around it, which is grouped by calendar rather than by project. */
+  /* CREATE · the areas, their stages and their checklists
+     One editor for the whole tree, because the tree is one thing: an area is
+     its name, its colour, the noun for one of its things, the words its
+     sessions are called and the path its work walks. Splitting it into an
+     "areas" editor and a "stages" editor would have meant picking which area
+     you were editing in one panel to see its stages in another.
+
+     A stage's key is what a work's stage and every one of its ticks is filed
+     under, so it is shown but never edited: relabel and recolour freely,
+     delete only a stage nothing sits on. Keys are unique inside an area and
+     not across them, so both areas may have an `idea`. The items are plain
+     lines, and a tick is filed under the item's own text — reordering a list
+     keeps every tick, rewording a line drops that one line's. */
+  /* The three optional meta chips, named here as well as in create.js. The
+     module owns the prompts and the units; this owns the checkboxes. Two short
+     lists rather than one shared export, because settings.js already renders
+     every other editor without asking its module anything. */
+  'create.areas': {
+    title: 'Areas, stages and checklists',
+    note: 'The kinds of work CREATE holds, and for each one the path it walks and what every stage asks of it. One checklist item per line. An area\'s last stage is its finished one — work there is filed under "finished" and is asked for nothing.',
+    render() {
+      const areas = Config.get('create.areas') || [];
+      return areas.map(a => `<div class="ed-area" data-area="${esc(a.key)}">
+          <div class="ed-head">
+            <input type="text" data-afield="label" value="${esc(a.label)}" placeholder="area" aria-label="area name">
+            <input type="color" class="ed-swatch" data-afield="color" value="${esc(a.color || '#888888')}" aria-label="${esc(a.label)} colour">
+            <button class="ed-del" data-del="${esc(a.key)}" aria-label="delete area">×</button>
+          </div>
+          <div class="ed-pair">
+            <input type="text" data-afield="noun" value="${esc(a.noun || '')}" placeholder="song" aria-label="one of them is called">
+            <input type="text" data-afield="plural" value="${esc(a.plural || '')}" placeholder="songs" aria-label="several are called">
+          </div>
+          <div class="ed-hint">one is a <b>${esc(a.noun || 'thing')}</b>, several are <b>${esc(a.plural || 'things')}</b> — the words the app uses about it</div>
+          <input type="text" data-afield="kinds" value="${esc((a.kinds || []).join(', '))}"
+                 placeholder="writing, mixing, listening" aria-label="session kinds">
+          <div class="ed-hint">session chips, comma separated — a shortcut, not a limit on what you can type</div>
+          <div class="ed-flags">${CREATE_FIELDS.map(f => `
+            <label class="ed-flag"><input type="checkbox" data-aflag="${esc(f.k)}"
+              ${(a.fields || CREATE_FIELDS.map(x => x.k)).includes(f.k) ? 'checked' : ''}
+              aria-label="${esc(a.label)} asks for ${esc(f.label)}"><span>${esc(f.label)}</span></label>`).join('')}</div>
+          <div class="ed-hint">which chips this area's things carry — a song has a key, a DJ set does not. Switching one off only stops it being asked: what is already written stays and comes back if you switch it on again.</div>
+          ${(a.stages || []).map(st => `<div class="ed-card" data-key="${esc(st.key)}">
+            <div class="ed-head">
+              <input type="text" data-field="label" value="${esc(st.label)}" placeholder="stage" aria-label="stage name">
+              <input type="color" class="ed-swatch" data-field="color" value="${esc(st.color || '#888888')}" aria-label="${esc(st.label)} colour">
+              <button class="ed-del" data-del="${esc(a.key)}/${esc(st.key)}" aria-label="delete stage">×</button>
+            </div>
+            <textarea data-field="items" rows="${Math.min(12, Math.max(2, (st.items || []).length))}"
+                      spellcheck="false" aria-label="${esc(st.label)} checklist">${esc((st.items || []).join('\n'))}</textarea>
+            <div class="ed-hint">key <code>${esc(st.key)}</code>${st.terminal ? ' · the finished stage' : ''}</div>
+          </div>`).join('')}
+          <button class="ed-add" data-add="${esc(a.key)}">+ add a stage to ${esc(a.label)}</button>
+          <div class="ed-pals">${STAGE_PALETTES.map(p => `
+            <button class="ed-pal" data-ed="${esc(a.key)}/${esc(p.id)}"
+                    aria-label="recolour ${esc(a.label)}'s stages · ${esc(p.label)}">
+              <span class="ed-pal-sw">${p.colors.map(c =>
+                `<i style="background:${esc(c)}"></i>`).join('')}</span>
+              <span class="ed-pal-n">${esc(p.label)}</span>
+            </button>`).join('')}</div>
+          <div class="ed-hint">a palette across ${esc(a.label)}'s stages, first to finished — the swatches above stay yours to change afterwards</div>
+        </div>`).join('') + `<button class="ed-add ed-add-area" data-add="1">+ add an area</button>`;
+    },
+    read(box) {
+      const was = Config.get('create.areas') || [];
+      const out = [];
+      box.querySelectorAll('.ed-area').forEach(el => {
+        const key = el.dataset.area;
+        const old = was.find(x => x.key === key) || {};
+        const noun = el.querySelector('[data-afield=noun]').value.trim() || 'thing';
+        const stages = [];
+        el.querySelectorAll('.ed-card').forEach(card => {
+          const sk = card.dataset.key;
+          const prev = (old.stages || []).find(x => x.key === sk) || {};
+          const st = {
+            key: sk,
+            label: card.querySelector('[data-field=label]').value.trim() || sk,
+            color: card.querySelector('[data-field=color]').value,
+            items: lines(card.querySelector('[data-field=items]').value),
+          };
+          if (prev.terminal) st.terminal = true;
+          stages.push(st);
+        });
+        /* An area's finished stage is found by `terminal`, never by its key or
+           its position, so deleting it would leave a shelf with no way to
+           finish anything. If it has gone, the last stage becomes it. */
+        if (stages.length && !stages.some(x => x.terminal)) stages[stages.length - 1].terminal = true;
+        out.push({
+          key,
+          label: el.querySelector('[data-afield=label]').value.trim() || key,
+          color: el.querySelector('[data-afield=color]').value,
+          noun,
+          plural: el.querySelector('[data-afield=plural]').value.trim() || (noun + 's'),
+          kinds: el.querySelector('[data-afield=kinds]').value.split(',').map(x => x.trim()).filter(Boolean),
+          fields: CREATE_FIELDS.map(f => f.k).filter(k => {
+            const box = el.querySelector('[data-aflag="' + k + '"]');
+            return box ? box.checked : true;
+          }),
+          newItem: Object.assign({}, old.newItem || {},
+                                 stages.length ? { stage: (old.newItem || {}).stage || stages[0].key } : {}),
+          stages,
+        });
+      });
+      Config.set('create.areas', out);
+    },
+    /* `+ add a stage` carries the area it belongs to; the one at the very
+       bottom carries "1" and means a new area. */
+    add(which) {
+      const areas = Config.get('create.areas') || [];
+      const a = areas.find(x => x.key === which);
+      if (!a) {
+        const key = uniqueKey('area', areas.map(x => x.key));
+        areas.push({ key, label:'New area', color:'#7a8699', noun:'thing', plural:'things',
+                     kinds:[], newItem:{ stage:'idea', bpm:'', key:'', tags:'' },
+                     stages:[{ key:'idea', label:'idea', color:'#7a8699', items:['first thing'] },
+                             { key:'done', label:'finished', color:'#5cdb7d', terminal:true, items:[] }],
+                     fields: CREATE_FIELDS.map(f => f.k) });
+      } else {
+        a.stages = a.stages || [];
+        const key = uniqueKey('stage', a.stages.map(x => x.key));
+        /* In front of the finished one: a new stage is more work to do, and
+           work after "finished" is not a stage. */
+        const at = a.stages.findIndex(x => x.terminal);
+        a.stages.splice(at < 0 ? a.stages.length : at, 0,
+                        { key, label:'New stage', color:'#7a8699', items:['first thing'] });
+      }
+      Config.set('create.areas', areas);
+    },
+    /* `data-ed` is the third verb, alongside add and del: an editor action
+       that is neither. Here it is "areaKey/paletteId" — recolour that area's
+       stages from that ramp. */
+    act(what) {
+      const areas = Config.get('create.areas') || [];
+      const [ak, pid] = String(what).split('/');
+      const a = areas.find(x => x.key === ak); if (!a) return;
+      const ramp = paletteRamp(pid, (a.stages || []).length);
+      if (!ramp) return;
+      a.stages.forEach((st, i) => { st.color = ramp[i]; });
+      /* The area's own colour is the head of its ramp, so the chip, the shelf
+         strip and the stage bar are one family rather than a family and one
+         leftover. */
+      a.color = ramp[0];
+      Config.set('create.areas', areas);
+      Shell.toast(a.label + ' · ' + pid);
+    },
+    /* "areaKey" deletes an area, "areaKey/stageKey" one of its stages. The
+       last area is never deleted — a shelf with nowhere to put anything is not
+       a state the app can draw. */
+    del(what) {
+      const areas = Config.get('create.areas') || [];
+      const [ak, sk] = String(what).split('/');
+      if (sk === undefined) {
+        if (areas.length <= 1) return;
+        Config.set('create.areas', areas.filter(x => x.key !== ak));
+        return;
+      }
+      const a = areas.find(x => x.key === ak); if (!a) return;
+      a.stages = (a.stages || []).filter(x => x.key !== sk);
+      Config.set('create.areas', areas);
+    },
+  },
+
+  /* TOOLS
+     One editor, because there is one thing here a person changes: the shape of
+     a breathing round. The pomodoro's four numbers are dials rather than
+     content and live with the rest of the app's dials. */
+  'tools.wimhof': {
+    title: 'The breathing round',
+    note: 'Where the tool\u2019s own sliders start from. The retention is deliberately not here \u2014 it has no length, because how long you last is the thing being measured. The label is what the finished session is called in LOG\u2019s day and on DAY\u2019s schedule.',
+    render() {
+      const w = Object.assign({ rounds:3, breaths:30, pace:2.25, recovery:15, chime:true, label:'breathing' },
+                              Config.get('tools.wimhof') || {});
+      const num = (k, label, min, max, step, hint) => `<div class="f">
+        <label class="lbl">${esc(label)}${hint ? `<em>${esc(hint)}</em>` : ''}</label>
+        <input type="number" data-field="${esc(k)}" value="${esc(w[k])}"
+               min="${min}" max="${max}" step="${step}" aria-label="${esc(label)}"></div>`;
+      /* The three ranges the *tool's* sliders offer, so a default cannot be set
+         to a number the tool would then clamp the moment you touched it. */
+      return `<div class="ed-card">
+        ${num('rounds', 'Rounds', 1, 5, 1, 'a full breathe, hold and recover')}
+        ${num('breaths', 'Breaths per round', 5, 80, 1)}
+        ${num('pace', 'Seconds per breath', 1, 5, 0.25, 'in and out together \u2014 the ring follows it')}
+        ${num('recovery', 'Recovery hold', 5, 30, 1, 'seconds, on the big inhale')}
+        <div class="f"><label class="lbl">Name it</label>
+          <input type="text" data-field="label" value="${esc(w.label)}" maxlength="40"
+                 aria-label="session name"></div>
+        <div class="setting-row">
+          <span class="setting-lbl">Chime on each phase<small>uses the app\u2019s own sound \u2014 silent while sounds are off</small></span>
+          <button class="tog${w.chime ? ' on' : ''}" data-field="chime" data-toggle-cfg="1"
+                  role="switch" aria-checked="${w.chime}" aria-label="chime on each phase"></button>
+        </div>
+      </div>`;
+    },
+    read(box) {
+      const card = box.querySelector('.ed-card'); if (!card) return;
+      const v = k => card.querySelector(`[data-field="${k}"]`);
+      const numOf = (k, dflt, min, max) => {
+        const n = parseFloat((v(k) || {}).value);
+        return isFinite(n) ? Math.min(max, Math.max(min, n)) : dflt;
+      };
+      Config.set('tools.wimhof', {
+        rounds:   numOf('rounds', 3, 1, 5),
+        breaths:  numOf('breaths', 30, 5, 80),
+        pace:     numOf('pace', 2.25, 1, 5),
+        recovery: numOf('recovery', 15, 5, 30),
+        chime:    (v('chime') || {}).classList ? v('chime').classList.contains('on') : true,
+        label:    ((v('label') || {}).value || 'breathing').trim().slice(0, 40) || 'breathing',
+      });
+    },
+  },
+
+  /* OPTIMISE's lists
+     A card per list, and the card is the whole thing: what it is called, what
+     colour and icon it wears, and its steps as one line each. The steps are a
+     textarea for the reason every other ordered list in Config is one — a row
+     of inputs for something you reorder by retyping is a worse textarea.
+
+     The icons and the palette are asked of TOOLS rather than restated here, so
+     the editor can only ever offer what the tool can actually draw. */
+  'tools.optimise': {
+    title: 'Optimise lists',
+    note: 'A list is something you do in a fixed order and would like to get faster at — a morning routine, a pack-down, a set-up. Give it its steps and it appears on the shelf with a START and your best time on it. Each step is timed on its own, and a step faster than your best for it comes back gold.',
+    render() {
+      const lists = optLists();
+      const icons  = (window.TOOLS && TOOLS.icons)   ? TOOLS.icons()   : ['bolt'];
+      const swatch = (window.TOOLS && TOOLS.palette) ? TOOLS.palette() : ['#e8a33d'];
+      const glyph  = k => (window.TOOLS && TOOLS.iconHTML) ? TOOLS.iconHTML(k) : '';
+      const MODES = [['preset','from the palette'], ['custom','a colour of its own'],
+                     ['accent','the app’s accent'], ['gradient','accent gradient']];
+      if (!lists.length) return `<div class="ed-hint">No lists yet.</div>
+        <button class="ed-add" data-add="1">+ add a list</button>`;
+      return lists.map((l, i) => {
+        const mode = ['accent','gradient','custom','preset'].includes(l.colorMode) ? l.colorMode : 'preset';
+        const own = mode === 'preset' || mode === 'custom';
+        return `<div class="ed-card" data-i="${i}">
+          <div class="ed-head">
+            <input type="text" data-field="name" value="${esc(l.name || '')}" maxlength="40"
+                   placeholder="morning routine" aria-label="list name">
+            <input type="color" class="ed-swatch" data-field="color" value="${esc(l.color || '#e8a33d')}"
+                   aria-label="${esc(l.name || 'list')} colour">
+            <button class="ed-del" data-del="${i}" aria-label="delete list">×</button>
+          </div>
+          <div class="chips">${MODES.map(([m, word]) =>
+            `<button class="chip${mode === m ? ' on' : ''}" data-ed="${i}/mode/${m}"
+                     type="button">${esc(word)}</button>`).join('')}</div>
+          ${own ? `<div class="tl-ed-swatches">${swatch.map(c =>
+            `<button type="button" class="${String(l.color || '').toLowerCase() === c ? 'on' : ''}"
+                     data-ed="${i}/color/${c.slice(1)}" style="--sw:${c}"
+                     aria-label="use ${c}"></button>`).join('')}</div>` : ''}
+          <div class="tl-ed-icons ns-tools">${icons.map(k =>
+            `<button type="button" class="${l.icon === k ? 'on' : ''}" data-ed="${i}/icon/${k}"
+                     aria-label="${esc(k)}">${glyph(k)}</button>`).join('')}</div>
+          <textarea data-field="steps" rows="${Math.min(14, Math.max(3, (l.steps || []).length + 1))}"
+                    spellcheck="false" placeholder="walk kamo&#10;gym&#10;shower"
+                    aria-label="steps">${esc((l.steps || []).join('\n'))}</textarea>
+          <div class="ed-hint">one step a line, in the order you do them — each is timed on its own</div>
+        </div>`;
+      }).join('') + `<button class="ed-add" data-add="1">+ add a list</button>`;
+    },
+    read(box) {
+      const src = optLists();
+      const out = [];
+      box.querySelectorAll('.ed-card').forEach((card, i) => {
+        const v = f => card.querySelector(`[data-field="${f}"]`);
+        const was = src[i] || {};
+        out.push(Object.assign({}, was, {
+          /* The id is minted once and never re-derived from the name: it is the
+             key the record book and the history are filed under, so renaming a
+             list must not orphan its times. */
+          id:    optId(was, i),
+          name:  ((v('name') || {}).value || '').trim().slice(0, 40) || 'list ' + (i + 1),
+          color: (v('color') || {}).value || '#e8a33d',
+          steps: lines((v('steps') || {}).value || '').slice(0, 24),
+        }));
+      });
+      Config.set('tools.optimise', out);
+    },
+    /* The three pickers. Each is one field on one list, so they go through the
+       editor `act` hook rather than growing a listener of their own. */
+    act(spec) {
+      const [iRaw, field, val] = String(spec).split('/');
+      const i = +iRaw;
+      const lists = optLists();
+      if (!lists[i]) return;
+      if (field === 'mode')  lists[i].colorMode = val;
+      if (field === 'icon')  lists[i].icon = val;
+      if (field === 'color') { lists[i].color = '#' + val; lists[i].colorMode =
+        lists[i].colorMode === 'accent' || lists[i].colorMode === 'gradient' ? 'preset' : lists[i].colorMode; }
+      Config.set('tools.optimise', lists);
+    },
+    add() {
+      const lists = optLists();
+      const swatch = (window.TOOLS && TOOLS.palette) ? TOOLS.palette() : ['#e8a33d'];
+      lists.push({ id: 'l' + Date.now().toString(36), name: 'new list',
+                   color: swatch[lists.length % swatch.length], colorMode: 'preset',
+                   icon: 'bolt', steps: [] });
+      Config.set('tools.optimise', lists);
+    },
+    del(which) {
+      const lists = optLists();
+      const i = +which;
+      if (i < 0 || i >= lists.length) return;
+      lists.splice(i, 1);
+      Config.set('tools.optimise', lists);
+    },
+  },
+
+  'cal.eventColors': {
+    title: 'Event colours',
+    note: 'The template hours around your blocks, coloured by the calendar they sit on. One per line: the calendar name, a pipe, then a hex colour. The line "*" is the fallback for a calendar this list has never heard of. A task keeps its own project\'s colour and is not set here.',
+    render() {
+      const c = Config.get('cal.eventColors') || {};
+      return `<div class="f">
+        <textarea data-cfg="cal.eventColors" data-map="1" rows="${Math.min(12, Math.max(4, Object.keys(c).length))}"
+                  spellcheck="false" aria-label="calendar to colour"
+          >${esc(Object.keys(c).map(k => k + ' | ' + c[k]).join('\n'))}</textarea>
+        <div class="ed-hint">calendar | #hex — the first pipe divides them, so the name may hold more</div>
+      </div>
+      <div class="f">
+        <label class="lbl">Unclaimed slot <em>what an empty block hour is called</em></label>
+        <input type="text" data-cfg="cal.idleLabel" value="${esc(Config.get('cal.idleLabel') || '')}"
+               aria-label="unclaimed slot label">
+      </div>`;
+    },
+    paths: ['cal.eventColors', 'cal.idleLabel'],
+    read() {},
+  },
+};
+
+const EDITOR_ORDER = ['do.routines','do.mediaLabels','do.travelCategories','log.blocks','log.labels','log.fields',
+                      'plan.types','plan.chips','plan.formFields','plan.presets','plan.calendars','plan.dayTemplates',
+                      'store.categories','store.meals','store.quickAmounts',
+                      'tend.groups','tend.labels','track.labels','learn.ratings','cal.eventColors',
+                      'create.areas','tools.wimhof','tools.optimise'];
+
+/* OPTIMISE's lists, read as a fresh array every time. The editor writes the
+   whole branch on every change, so it must never hand Config a reference to
+   the object Config already holds — an in-place edit would slip past
+   `isCustom` and the subscribe that redraws the tool. */
+function optLists() {
+  const raw = Config.get('tools.optimise');
+  return Array.isArray(raw) ? JSON.parse(JSON.stringify(raw)) : [];
+}
+const optId = (was, i) => String(was.id || 'l' + Date.now().toString(36) + i).slice(0, 40);
+
+function editorHTML(path) {
+  const ed = EDITORS[path];
+  const paths = ed.paths || [path];
+  const custom = paths.some(p => Config.isCustom(p)) ||
+                 (path === 'do.routines' && Config.isCustom('do.tabs')) ||
+                 (path === 'do.travelCategories' && Config.isCustom('do.categoryOrder')) ||
+                 (path === 'log.blocks' && Config.isCustom('log.maxBlocks'));
+  return `
+    <div class="sec"><span>${esc(ed.title)}</span>
+      <button class="sec-reset${custom ? '' : ' hidden'}" data-cfg-reset="${path}">reset to default</button>
+    </div>
+    ${ed.note ? `<div class="set-note">${ed.note}</div>` : ''}
+    <div data-group="${path}">${ed.render()}</div>`;
+}
+
+/* Each app's content editors sit at the end of that app's own panel, in its
+   [data-content-for] box — there is no separate content panel any more. With
+   no argument every box is refilled (after an add, a delete or a reset). */
+function renderContent(app) {
+  $all('[data-content-for]').forEach(box => {
+    const a = box.dataset.contentFor;
+    if (app && a !== app) return;
+    const paths = EDITOR_ORDER.filter(p => p.split('.')[0] === a);
+    box.innerHTML = !paths.length ? '' : `
+      <div class="sec"><span>Content</span></div>
+      <div class="set-note">What ${esc(APP_NAMES[a] || a)} used to have baked into its
+        code. Edits save as you type and take effect at once. Each section can be
+        put back to what ROOT ships with on its own.</div>` + paths.map(editorHTML).join('');
+  });
+}
+
+/* Paths a group's "reset to default" has to clear — a collection and the index
+   that orders it always go back together. */
+const RESET_BUNDLE = {
+  'do.routines':          ['do.routines','do.tabs'],
+  'do.travelCategories':  ['do.travelCategories','do.categoryOrder'],
+  'log.blocks':           ['log.blocks','log.maxBlocks'],
+  'log.labels':           ['log.meds','log.medsOn','log.mealCount','log.mealLabel','log.caffeine','log.curate','log.scales','log.workouts',
+                           'log.kmTarget','log.streakRequires'],
+  'plan.chips':           ['plan.blocks','plan.times'],
+  'tend.labels':          ['tend.tasks','tend.seasons','tend.growth','tend.feedFloor'],
+  'track.labels':         ['track.phases','track.levelLabel','track.pse','track.revision'],
+};
+
+
+/* DATA */
+
+function tdStatus(msg, kind) {
+  const el = $id('set-td-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'td-status' + (kind ? ' ' + kind : '');
+}
+
+/* onShow re-renders this panel every time the settings tab comes back up, so the
+   field is only refilled from storage when it holds nothing the user has not
+   saved yet — otherwise leaving the tab and returning wiped a key that had been
+   pasted but not saved. */
+function renderToken() {
+  const tok = Creds.token();
+  const inp = $id('set-td-token');
+  if (inp) {
+    const unsaved = inp.value && inp.value !== tok;
+    if (!unsaved && document.activeElement !== inp) inp.value = tok;
+  }
+  tdStatus(tok ? 'key saved · used by DO, PLAN and STORE' : 'no key yet', tok ? 'good' : '');
+}
+
+function saveToken() {
+  Creds.save($id('set-td-token').value.trim());
+  renderToken();
+  Shell.toast(Creds.token() ? 'todoist key saved' : 'todoist key cleared');
+}
+
+/* A single check against the account, rather than three per-app ones. Each app
+   still has its own project/section test in its own panel. */
+async function testToken() {
+  const tok = Creds.token();
+  if (!tok) { tdStatus('paste your key and save it first', 'bad'); return; }
+  const btn = $id('set-td-test');
+  btn.disabled = true;
+  tdStatus('checking…', 'busy');
+  try {
+    const res = await fetch('https://api.todoist.com/api/v1/projects?limit=1',
+                            { headers: { 'Authorization': 'Bearer ' + tok } });
+    if (res.status === 401 || res.status === 403) throw new Error('key rejected by Todoist');
+    if (!res.ok) throw new Error('Todoist error ' + res.status);
+    tdStatus('key works — DO, PLAN and STORE are all using it', 'good');
+  } catch (e) {
+    tdStatus(location.protocol === 'file:'
+      ? 'blocked by the browser — serve over http(s), not as a local file'
+      : e.message, 'bad');
+  } finally { btn.disabled = false; }
+}
+
+function renderStorage() {
+  const keys = allKeys();
+  let total = 0;
+  const sizes = {};
+  keys.forEach(k => {
+    const n = k.length + (localStorage.getItem(k) || '').length;
+    total += n;
+    const g = GROUPS.find(g => g.match(k));
+    if (g) sizes[g.name] = (sizes[g.name] || 0) + n;
+  });
+  // localStorage is ~5MB on every browser that matters; the meter is indicative
+  const CAP = 5 * 1024 * 1024;
+  const rows = GROUPS.map(g => {
+    const n = keys.filter(g.match).length;
+    return `<div class="data-stat">
+      <span class="data-stat-k">${g.name}</span>
+      <span class="data-stat-v">${n} key${n === 1 ? '' : 's'} · ${fmtSize(sizes[g.name] || 0)}</span>
+    </div>`;
+  }).join('');
+  $id('set-storage').innerHTML = rows + `
+    <div class="data-stat"><span class="data-stat-k">All keys on this origin</span>
+      <span class="data-stat-v">${keys.length} · ${fmtSize(total)}</span></div>
+    <div class="st-meter"><i style="width:${Math.min(100, total / CAP * 100).toFixed(1)}%"></i></div>
+    <div class="st-legend"><span>${(total / CAP * 100).toFixed(1)}% of a typical 5 MB budget</span></div>
+    <div class="data-stat" id="set-storage-idb"><span class="data-stat-k">LEARN decks (IndexedDB)</span>
+      <span class="data-stat-v">…</span></div>`;
+  // the decks are outside localStorage and outside the backup; say how much is there
+  if (window.LEARN) LEARN.deckStats().then(s => {
+    const el = $id('set-storage-idb'); if (!el) return;
+    el.querySelector('.data-stat-v').textContent = s.ok
+      ? `${s.decks} deck${s.decks === 1 ? '' : 's'} · ${s.cards} cards · ${fmtSize(s.bytes)} media · not in the backup`
+      : 'unavailable';
+  });
+}
+
+function renderData() {
+  renderToken();
+  renderStorage();
+  const n = Config.customPaths().length;
+  const el = $id('set-custom-count');
+  if (el) el.textContent = n ? `${n} section${n === 1 ? '' : 's'} customised` : 'nothing customised yet';
+}
+
+/* SYNC — the two routes, the overlap sheet, and the one undo behind them.
+   Everything the merge can settle is applied before the sheet ever opens; it
+   holds only the things that were written on both devices and disagree. */
+
+const agoText = t => {
+  if (!t) return null;
+  const mins = Math.round((Date.now() - t) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + ' min ago';
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return hrs + 'h ago';
+  return Math.round(hrs / 24) + 'd ago';
+};
+
+/* The frequency dial's words. `0` is off, and the rest read as a sentence
+   rather than as a number with a unit hung off it. */
+const EVERY_LABEL = v => v === '0' ? 'off'
+  : v === '60' ? 'hourly'
+  : v + ' min';
+
+function renderSync() {
+  if (!window.SYNC) return;
+  const dials = $id('sync-dials');
+  if (dials) dials.innerHTML =
+    chips('syncEvery', Prefs.SCHEMA.syncEvery.values.map(v => ({ v, l: EVERY_LABEL(v) })),
+          'Refresh on its own',
+          'a run takes what is there, merges it and sends back what this device holds') +
+    toggle('syncSafe', 'Safe transfer',
+           'keep the logged days, the curriculum and the shopping list off Todoist') +
+    slider('syncDays', 'How far the window reaches', v => '±' + Math.round(v) + ' days');
+
+  const groups = $id('sync-groups');
+  if (groups) groups.innerHTML =
+    toggle('syncApps', 'apps', 'everything the apps write — days, lists, ticks, plants, works') +
+    toggle('syncSettings', 'settings', 'the content edits under each app') +
+    toggle('syncStyle', 'style', 'the whole appearance setup: theme, layout, type, motion') +
+    toggle('syncSystem', 'system', 'the tab you were on, the label cache, the sync stamps');
+
+  const when = $id('sync-now-when');
+  if (when) {
+    const push = agoText(SYNC.lastAt('todoist', 'push'));
+    const pull = agoText(SYNC.lastAt('todoist', 'pull'));
+    const every = String(Prefs.get('syncEvery') || '0');
+    when.textContent = [push ? 'sent ' + push : 'never sent',
+                        pull ? 'taken in ' + pull : 'never taken in',
+                        every === '0' ? 'manual' : 'every ' + EVERY_LABEL(every)].join(' · ');
+  }
+
+  ['todoist', 'file'].forEach(r => {
+    const el = $id('sync-' + r + '-when');
+    if (!el) return;
+    const push = agoText(SYNC.lastAt(r, 'push'));
+    const pull = agoText(SYNC.lastAt(r, 'pull'));
+    const bits = [];
+    if (push) bits.push((r === 'file' ? 'written ' : 'pushed ') + push);
+    if (pull) bits.push('imported ' + pull);
+    el.textContent = bits.join(' · ') || (r === 'file' ? 'never written' : 'never pushed');
+  });
+  const undoRow = $id('sync-undo-row');
+  if (undoRow) undoRow.hidden = !SYNC.canUndo();
+}
+
+function syncWrite(planned, route, id) {
+  const res = SYNC.commit(planned);
+  if (!res.ok) { Shell.toast('storage full — nothing changed'); return; }
+  /* The id names what was taken in, so the next run can say "already up to
+     date" without planning the same merge again. */
+  SYNC.markPulled(route, id);
+  Shell.ask({
+    title: `Imported ${res.written} record${res.written === 1 ? '' : 's'}`,
+    body: 'Every view re-reads its data on reload. Nothing else on this device was touched, '
+        + 'and this import can be undone from this panel.',
+    yes: 'reload now', no: 'later',
+    done: a => { if (a) location.reload(); else renderSync(); },
+  });
+}
+
+/* Nothing is written until the plan has been looked at: a silent import that
+   overwrites twenty days is the worst thing this panel could do. */
+function syncReview(payload, route) {
+  let planned;
+  try { planned = SYNC.plan(route, payload); }
+  catch (err) { Shell.toast(String(err.message || err)); return; }
+
+  if (!planned.writes.length) { Shell.toast('already up to date'); renderSync(); return; }
+  Shell.ask({
+    title: `Apply ${planned.writes.length} change${planned.writes.length === 1 ? '' : 's'}?`,
+    body: (planned.notes.slice(0, 8).join(' · ') || 'records this device did not have')
+        + (planned.notes.length > 8 ? ` · and ${planned.notes.length - 8} more` : '')
+        + '. Nothing here is replaced outright — a day only gains what it was missing.',
+    yes: 'import',
+    done: a => { if (a) syncWrite(planned, route, payload.id); },
+  });
+}
+
+/* ── One tap ────────────────────────────────────────────────────
+   The button at the top of DO and the one in this section are the same thing:
+   sync, without being asked which direction. SYNC.run() takes what is there,
+   merges it and sends back what this device holds afterwards; the one thing it
+   will not decide on its own is a tie — the same record written on both devices
+   in the same moment — which comes back as a plan for the overlap sheet.
+
+   `already` is the payload saying, by its id, that this device has taken these
+   exact contents in before. It is answered before a merge is planned. */
+let syncRunning = false;
+
+async function syncNow(btn) {
+  if (syncRunning) return;
+  if (!Creds.token()) { Shell.toast('no Todoist key saved'); return; }
+  syncRunning = true;
+  const was = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'syncing…'; }
+  const bits = [];
+  try {
+    /* DO's routines first, and not as an afterthought: closing a finished
+       routine in Todoist and ticking one that was finished on the other device
+       is what "sync" meant on that header long before this button existed.
+       It runs first because it can tick routines *here*, and those ticks should
+       be in the payload the device sync sends a moment later. */
+    if (window.DO && DO.syncTodoist) {
+      const routines = await DO.syncTodoist(true);
+      /* Only when it actually moved something. DO's own panel keeps the full
+         answer, including "no Todoist section chosen" — which is a thing to
+         read there once, not on every sync from here. */
+      if (routines && (routines.pulled || routines.pushed || routines.failed)) bits.push(routines.msg);
+    }
+
+    const r = await SYNC.run();
+    if (r.imported) bits.push('took in ' + r.imported);
+    else if (r.already && !bits.length) bits.push('already up to date');
+    if (r.pushed && !r.pushed.unchanged) {
+      const n = (r.pushed.added || 0) + (r.pushed.updated || 0);
+      if (n) bits.push('sent ' + n);
+      /* A record too big for one Todoist task is left behind on purpose. Saying
+         so is the difference between a known limit and a silent hole. */
+      if (r.pushed.skipped && r.pushed.skipped.length)
+        bits.push(r.pushed.skipped.length + ' too big to send');
+    }
+    Shell.toast(bits.join(' · ') || 'nothing to sync');
+    /* Records landed in storage, and every view is holding what it read at
+       boot — which is how an import that worked looks like one that did not.
+       The same offer the reviewed import has always made. */
+    if (r.imported) offerReload(r.imported);
+  } catch (err) { Shell.toast(String(err.message || err)); }
+  if (btn) { btn.disabled = false; btn.textContent = was; }
+  syncRunning = false;
+  renderSync();
+}
+
+/* One place, because three paths now write records behind a view that is
+   already drawn: the reviewed import, one tap, and the automatic run. */
+function offerReload(n) {
+  Shell.ask({
+    title: `Took in ${n} record${n === 1 ? '' : 's'}`,
+    body: 'Every view re-reads its data on reload. Nothing else on this device was touched, '
+        + 'and this import can be undone from settings → sync.',
+    yes: 'reload now', no: 'later',
+    done: a => { if (a) location.reload(); else renderSync(); },
+  });
+}
+
+async function syncPushTodoist(btn) {
+  if (!Creds.token()) { Shell.toast('no Todoist key saved'); return; }
+  const was = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'sending…'; }
+  try {
+    const r = await SYNC.pushTodoist();
+    Shell.toast(`${r.added} new · ${r.updated} updated` +
+      (r.skipped && r.skipped.length ? ` · ${r.skipped.length} too big to send` : ''));
+  } catch (err) { Shell.toast(String(err.message || err)); }
+  if (btn) { btn.disabled = false; btn.textContent = was; }
+  renderSync();
+}
+
+async function syncPullTodoist(btn) {
+  if (!Creds.token()) { Shell.toast('no Todoist key saved'); return; }
+  const was = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'reading…'; }
+  let payload = null;
+  try { payload = await SYNC.pullTodoist(); }
+  catch (err) { Shell.toast(String(err.message || err)); }
+  if (btn) { btn.disabled = false; btn.textContent = was; }
+  if (payload) syncReview(payload, 'todoist');
+}
+
+async function syncPushFile() {
+  try { const name = await SYNC.exportFile(); if (name) Shell.toast('wrote ' + name); }
+  catch (err) { Shell.toast(String(err.message || err)); }
+  renderSync();
+}
+
+function syncPickFile() { $id('sync-file-input').click(); }
+
+function syncReadFile(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    event.target.value = '';
+    let payload;
+    try { payload = SYNC.parseFile(reader.result); }
+    catch (err) { Shell.toast(String(err.message || err)); return; }
+    syncReview(payload, 'file');
+  };
+  reader.readAsText(file);
+}
+
+/* Everything: the whole install as one .md. Not a merge — a restore replaces
+   what the file names, which is what "move me to a new phone" means. It still
+   goes through the sync snapshot, so it can be taken back once. */
+async function syncPushAll(btn) {
+  const withToken = !!$id('sync-all-token')?.checked;
+  const was = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'writing…'; }
+  try { const name = await SYNC.exportEverything(withToken); if (name) Shell.toast('wrote ' + name); }
+  catch (err) { Shell.toast(String(err.message || err)); }
+  if (btn) { btn.disabled = false; btn.textContent = was; }
+}
+
+function syncPickAll() { $id('sync-all-input').click(); }
+
+function syncReadAll(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    event.target.value = '';
+    let body;
+    try { body = SYNC.parseEverything(reader.result); }
+    catch (err) { Shell.toast(String(err.message || err)); return; }
+    const c = SYNC.everythingCount(body);
+    Shell.ask({
+      title: `Restore ${c.total} key${c.total === 1 ? '' : 's'}?`,
+      body: `${c.fresh} new · ${c.over} replaced. This is not a merge: every key the file `
+          + `names is replaced outright, and anything on this device it does not name is left `
+          + `alone. ${body.token ? 'It carries a Todoist key. ' : 'It carries no Todoist key, so yours stays. '}`
+          + `The app reloads afterwards, and this can be undone from here.`,
+      yes: 'restore', danger: true,
+      done: a => {
+        if (!a) return;
+        const res = SYNC.restoreEverything(body);
+        if (!res.ok) { Shell.toast('storage full — some keys were not written'); return; }
+        location.reload();
+      },
+    });
+  };
+  reader.readAsText(file);
+}
+
+function syncUndo() {
+  Shell.ask({
+    title: 'Undo the last import?',
+    body: 'Every key it overwrote goes back to what it held before. Anything changed since '
+        + 'is overwritten in turn, so this is worth doing straight away or not at all.',
+    yes: 'undo', danger: true,
+    done: a => { if (a && SYNC.undoImport()) location.reload(); },
+  });
+}
+
+/* Deliberately not filtered to the known prefixes: a backup that silently drops
+   a key is worse than one that carries a few bytes too many. */
+async function exportAll() {
+  const keys = allKeys();
+  if (!keys.length) { Shell.toast('nothing stored yet'); return; }
+  const data = {};
+  keys.forEach(k => { data[k] = localStorage.getItem(k); });
+  const payload = { app:'root', version:2, exported:new Date().toISOString(), data };
+  const json = JSON.stringify(payload);
+  const d = new Date();
+  const stamp = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const filename = `root_backup_${stamp}.json`;
+  try {
+    const file = new File([json], filename, { type:'application/json' });
+    if (navigator.canShare?.({ files:[file] })) { await navigator.share({ files:[file] }); return; }
+    if (navigator.share) { await navigator.share({ title:filename, text:json }); return; }
+  } catch (err) { if (err.name === 'AbortError') return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([json], { type:'application/json' }));
+  a.download = filename; a.click();
+  Shell.toast(`exported ${keys.length} keys`);
+}
+
+function pickImport() { $id('set-import-file').click(); }
+
+function importAll(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    event.target.value = '';
+    let payload;
+    try { payload = JSON.parse(reader.result); } catch { Shell.toast('invalid file'); return; }
+    const data = payload && typeof payload.data === 'object' ? payload.data : null;
+    if (!data) { Shell.toast('not a root backup'); return; }
+    const incoming = Object.keys(data);
+    if (!incoming.length) { Shell.toast('nothing in that file'); return; }
+    const existing = new Set(allKeys());
+    const overwrite = incoming.filter(k => existing.has(k)).length;
+    Shell.ask({
+      title: `Restore ${incoming.length} key${incoming.length !== 1 ? 's' : ''}?`,
+      body: `${incoming.length - overwrite} new · ${overwrite} will overwrite what is here. `
+          + `The app reloads afterwards.`,
+      yes: 'restore', danger: true,
+      done: a => {
+        if (!a) return;
+        try { incoming.forEach(k => { if (typeof data[k] === 'string') localStorage.setItem(k, data[k]); }); }
+        catch { Shell.toast('storage full — nothing changed'); return; }
+        location.reload();
+      },
+    });
+  };
+  reader.readAsText(file);
+}
+
+/* A theme/layout/content preset on its own, small enough to paste into a note or
+   a message. Deliberately separate from the full backup: appearance is the thing
+   people actually want to move between devices or share. */
+async function exportLook() {
+  const payload = { app:'root', kind:'look', version:2,
+                    prefs: Prefs.all(), config: Config.raw() };
+  const json = JSON.stringify(payload, null, 2);
+  try { await navigator.clipboard.writeText(json); Shell.toast('look copied to clipboard'); return; }
+  catch {}
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([json], { type:'application/json' }));
+  a.download = 'root_look.json'; a.click();
+}
+
+async function importLook() {
+  let text = '';
+  try { text = await navigator.clipboard.readText(); } catch {}
+  if (text.trim()) { applyLook(text); return; }
+  // no clipboard permission (or nothing in it): ask for it in the app's own field
+  Shell.prompt('Paste a ROOT look', '', v => applyLook(v));
+}
+function applyLook(text) {
+  if (!String(text || '').trim()) return;
+  let p;
+  try { p = JSON.parse(text); } catch { Shell.toast('that is not valid JSON'); return; }
+  if (!p || p.app !== 'root') { Shell.toast('not a root look'); return; }
+  if (p.prefs)  Prefs.setMany(p.prefs);
+  if (p.config) Config.replaceAll(p.config);
+  render();
+  Shell.toast('look applied');
+}
+
+
+/* The search index
+   Every control search can jump to, read off the controls themselves rather
+   than off a second list written by hand: the three generated panels are
+   rendered into a detached node and walked, and the app panels are walked
+   where they already stand in the document. A dial added to Prefs.SCHEMA and
+   rendered with chips() / slider() / toggle() is findable the moment it exists,
+   which is the only way an index like this stays honest.
+
+   Labels come from the three shapes the builders emit:
+     slider   .slider-row  > .slider-head .lbl
+     chips    .opt-set     > .lbl
+     toggle   .setting-row > .setting-lbl
+   … and the note inside a label (<em>, <small>) is kept as the subtitle. */
+function labelParts(el) {
+  const row = el.closest('.slider-row, .opt-set, .setting-row, .f, .ed-card');
+  if (!row) return null;
+  const lab = row.querySelector('.setting-lbl, .lbl');
+  if (!lab) return null;
+  const note = lab.querySelector('em, small');
+  const title = String(lab.textContent || '').replace(note ? String(note.textContent || '') : '', '').trim();
+  return title ? { title, note: note ? String(note.textContent || '').trim() : '' } : null;
+}
+/* The section this control sits under, so "grain" reads as "Texture · grain"
+   rather than floating free: the nearest .sec heading above it, looking up
+   through at most three levels of box. Iterative and depth-capped on purpose —
+   a climb that ends at .closest() of the element's own class walks in a circle,
+   which is exactly what a recursive version did. */
+function sectionOf(el) {
+  let node = el.closest('.slider-row, .opt-set, .setting-row, .f, .ed-card') || el;
+  for (let depth = 0; node && depth < 3; depth++) {
+    for (let n = node.previousElementSibling; n; n = n.previousElementSibling) {
+      if (n.classList && n.classList.contains('sec')) {
+        return String(n.textContent || '').replace('reset to default', '').trim();
+      }
+    }
+    if (node.classList && node.classList.contains('set-panel')) break;
+    node = node.parentElement;
+  }
+  return '';
+}
+function indexPanel(root, panelName, out, seen) {
+  root.querySelectorAll('[data-pref],[data-cfg],[data-cfg-toggle],[data-slider],[data-key-cap]').forEach(el => {
+    const key = el.dataset.pref || el.dataset.cfg || el.dataset.cfgToggle || el.dataset.slider
+             || (el.dataset.keyCap && 'keyMap.' + el.dataset.keyCap);
+    if (!key) return;
+    const id = panelName + ':' + key;
+    if (seen.has(id)) return;
+    const parts = labelParts(el);
+    if (!parts) return;
+    seen.add(id);
+    out.push({ kind:'setting', title: parts.title, sub: [SEG_NAMES[panelName] || panelName, sectionOf(el)].filter(Boolean).join(' · '),
+               words: [parts.title, parts.note, key, sectionOf(el)].join(' ').toLowerCase(), panel: panelName });
+  });
+}
+let indexCache = null;
+function searchIndex() {
+  if (indexCache) return indexCache;
+  const out = [], seen = new Set();
+  // the panels themselves, by name
+  PANELS.forEach(p => out.push({ kind:'panel', title: SEG_NAMES[p] || p,
+    sub: 'settings · ' + (CATS[catOf(p)] || {}).title,
+    words: [p, SEG_NAMES[p], APP_NAMES[p], APP_HINTS[p], (CATS[catOf(p)] || {}).title].filter(Boolean).join(' ').toLowerCase(),
+    panel: p }));
+  // the three generated ones, rendered off-document so nothing on screen moves
+  const box = document.createElement('div');
+  [['look', lookHTML], ['layout', layoutHTML], ['behave', behaveHTML]].forEach(([name, html]) => {
+    box.innerHTML = html();
+    indexPanel(box, name, out, seen);
+  });
+  box.innerHTML = '';
+  // the app panels, where they stand — their rows are static markup
+  $all('.set-panel[data-panel]').forEach(p => {
+    const name = p.dataset.panel;
+    if (['look','layout','behave'].includes(name)) return;
+    indexPanel(p, name, out, seen);
+    p.querySelectorAll('.setting-row .setting-lbl, .f > .lbl').forEach(lab => {
+      const note = lab.querySelector('em, small');
+      const title = String(lab.textContent || '').replace(note ? String(note.textContent || '') : '', '').trim();
+      const id = name + ':' + title;
+      if (!title || seen.has(id)) return;
+      seen.add(id);
+      out.push({ kind:'setting', title, sub: [SEG_NAMES[name] || name, sectionOf(lab)].filter(Boolean).join(' · '),
+                 words: [title, note ? note.textContent : '', sectionOf(lab)].join(' ').toLowerCase(), panel: name });
+    });
+  });
+  indexCache = out;
+  return out;
+}
+/* An edit can add a row (a content editor re-renders, an app panel does not
+   change shape) — the cheap correctness is to drop the cache on any change. */
+function dropIndex() { indexCache = null; }
+
+
+/* Panels */
+
+const RENDERERS = {
+  look: renderLook, layout: renderLayout, behave: renderBehave, data: renderData, sync: renderSync,
+  do:   () => { window.DO   && DO.renderSettings();    renderContent('do'); },
+  log:  () => { window.LOG  && LOG.renderDataScreen(); renderContent('log'); },
+  plan: () => { window.PLAN && PLAN.renderSettings();  renderContent('plan'); },
+  store:() => { window.STORE&& STORE.renderSettings(); renderContent('store'); },
+  tend: () => { window.TEND && TEND.renderSettings();  renderContent('tend'); },
+  track:() => { window.TRACK&& TRACK.renderSettings(); renderContent('track'); },
+  learn:() => { window.LEARN&& LEARN.renderSettings(); renderContent('learn'); },
+  cal:  () => { window.CAL  && CAL.renderSettings();   renderContent('cal'); },
+  create:() => { window.CREATE && CREATE.renderSettings(); renderContent('create'); },
+  tools:() => { window.TOOLS && TOOLS.renderSettings(); renderContent('tools'); },
+};
+
+/* Two screens: the home menu and a category. Switching screens starts at the
+   top; moving between pills inside a category does too. */
+function showScreen(id) {
+  $all('.scr').forEach(s => s.classList.toggle('on', s.id === 's-' + id));
+  const v = document.querySelector('#view-settings .view-body');
+  if (v) v.scrollTop = 0;
+  Shell.showChrome();
+}
+
+/* Home: the apps out of the bar, then the three categories ── */
+function renderHome() {
+  const box = $id('set-home'); if (!box) return;
+  const off = window.Shell && Shell.hidden ? Shell.hidden() : [];
+  box.innerHTML = `
+    <button class="set-search" data-act="search">
+      <svg aria-hidden="true"><use href="#ico-search"/></svg>
+      <span>search everything<small>apps, content and every setting by name · <b>/</b> on a keyboard</small></span>
+    </button>` + (off.length ? `
+    <div class="sec"><span>Not in the bar</span></div>
+    <div class="set-note">Switched off under appearance → layout. Their data and
+      settings are untouched; tap one to open it.</div>
+    <div class="set-apps">${off.map(a => `
+      <button class="set-app-b" data-open="${a}" aria-label="open ${esc(APP_NAMES[a] || a)}">
+        <svg aria-hidden="true"><use href="#tab-${a}"/></svg>
+        <span>${esc(APP_NAMES[a] || a)}<small>${esc(APP_HINTS[a] || '')}</small></span>
+      </button>`).join('')}</div>` : '') + `
+    <div class="sec"><span>Settings</span></div>
+    <div class="set-cats">${Object.keys(CATS).map(c => `
+      <button class="set-cat-b" data-cat="${c}">
+        <span class="set-cat-n">${esc(CATS[c].title)}</span>
+        <small>${esc(CATS[c].hint)}</small><i>→</i>
+      </button>`).join('')}</div>`;
+}
+function home() {
+  currentCat = null;
+  showScreen('home');
+  renderHome();
+  try { if (location.hash.startsWith('#settings')) history.replaceState(null, '', '#settings'); } catch {}
+}
+
+/* A category: its pill bar, then one of its panels ── */
+function cat(name) {
+  const c = CATS[name]; if (!c) return;
+  panel(c.panels.includes(lastPanel[name]) ? lastPanel[name] : c.panels[0]);
+}
+function renderSeg() {
+  const seg = $id('set-seg'); if (!seg) return;
+  const c = CATS[currentCat];
+  seg.classList.toggle('hidden', !c || c.panels.length < 2);
+  seg.innerHTML = !c ? '' : c.panels.map(p =>
+    `<button class="seg-b${p === currentPanel ? ' on' : ''}" data-seg="${p}">${esc(SEG_NAMES[p] || p)}</button>`).join('');
+  // seven app pills overflow a phone; keep the active one on screen
+  const on = seg.querySelector('.seg-b.on');
+  if (on && on.scrollIntoView) on.scrollIntoView({ block:'nearest', inline:'nearest' });
+}
+function panel(name) {
+  if (!PANELS.includes(name)) return;
+  currentPanel = name;
+  currentCat = catOf(name);
+  lastPanel[currentCat] = name;
+  const t = $id('set-cat-title'); if (t) t.textContent = CATS[currentCat].title;
+  renderSeg();
+  $all('.set-panel').forEach(p => p.classList.toggle('on', p.dataset.panel === name));
+  showScreen('cat');
+  // #settings/<panel> is linkable; the shell leaves this segment alone
+  try { if (location.hash.startsWith('#settings')) history.replaceState(null, '', '#settings/' + name); } catch {}
+  RENDERERS[name] && RENDERERS[name]();
+  syncStatic(document.querySelector('.set-panel[data-panel="' + name + '"]'), name);
+}
+
+/* Static controls bound to a pref
+   The three generated panels rebuild their markup from Prefs on every render,
+   so their switches are correct by construction. The app panels are static
+   markup in index.html: their `data-pref` switches were written with the
+   default already on them and nothing ever painted them again. A toggle there
+   flipped the stored value and left its own dot where it was — the CAL panel's
+   three switches had been doing that since they shipped — and reopening
+   settings showed the shipped default rather than the setting.
+
+   One pass over the panel after it renders, reading Prefs for each control it
+   finds. It knows three shapes and nothing else about what any of them mean:
+   a switch, a chip in an .opt-set, and a range with its readout. */
+function syncStatic(root, name) {
+  /* Only the static panels. look / layout / behave rebuild their own markup
+     from Prefs on every render, so they are already right — and two of their
+     dials (radius, border) have `null` for a default, meaning "leave it to the
+     theme". Painting those the way this does would put an empty value in the
+     input and NaN where the readout says `auto`. */
+  if (!root || ['look', 'layout', 'behave'].includes(name)) return;
+  root.querySelectorAll('[data-pref]').forEach(el => {
+    const key = el.dataset.pref;
+    if (!key || !(key in Prefs.SCHEMA)) return;
+    const v = Prefs.get(key);
+    if (v === null || v === undefined) return;
+    if (el.dataset.toggle) {
+      el.classList.toggle('on', !!v);
+      el.setAttribute('aria-checked', String(!!v));
+      return;
+    }
+    if (el.dataset.val !== undefined) {          // a chip: on when it is the value
+      el.classList.toggle('on', String(v) === el.dataset.val);
+      return;
+    }
+    if (el.type === 'checkbox') { el.checked = !!v; return; }
+    if (el.type === 'range') {
+      el.value = v;
+      const out = el.closest('.slider-row');
+      const lab = out && out.querySelector('.slider-val');
+      if (lab) lab.textContent = readoutFor(key, parseFloat(v));
+    }
+  });
+}
+
+function render() {
+  if (currentCat === null) renderHome();
+  else {
+    RENDERERS[currentPanel] && RENDERERS[currentPanel]();
+    syncStatic(document.querySelector('.set-panel[data-panel="' + currentPanel + '"]'), currentPanel);
+  }
+}
+
+
+/* One delegated listener for every generated control
+   Change events for text/colour/number/range inputs, clicks for chips, toggles
+   and editor buttons. Nothing here knows what any individual control means — it
+   reads the intent off the element and hands it to Prefs or Config. */
+
+const view = document.getElementById('view-settings');           // events are delegated from here
+const body = view.querySelector('.view-body') || view;             // … and this is what scrolls
+
+/* A control that re-renders its own panel must not move the page: the app
+   list sits well down the layout panel, and every switch there used to land
+   the reader back at the top. */
+function keepScroll(fn) { const y = body.scrollTop; fn(); if (body.scrollTop !== y) body.scrollTop = y; }
+
+function groupOf(el) { return el.closest('[data-group]'); }
+
+function commitGroup(el) {
+  const box = groupOf(el);
+  if (!box) return;
+  const ed = EDITORS[box.dataset.group];
+  if (ed && ed.read) ed.read(box);
+}
+
+/* data-cfg fields write one value straight to a Config path.
+
+   `data-sub` writes one key of an object and saves the object whole, which is
+   the only safe shape: an override is stored whole-branch, so writing the leaf
+   path alone would shadow the object with a one-key fragment and every other
+   key would read as undefined. A number or range input's sub is stored as a
+   number, so the modules never parse what they read. */
+const isNumeric = el => el.type === 'number' || el.type === 'range';
+function commitField(el) {
+  const path = el.dataset.cfg;
+  if (!path) return;
+  if (el.dataset.sub) {
+    /* `data-sub` may be dotted (mix.label) so the branch that is saved whole is
+       the one the module reads whole. 2.1 pointed these at log.curate.mix with
+       sub=label, which overrode log.curate with a one-slot fragment: rename one
+       curate counter and the other two vanished from the evening form. */
+    const obj = Config.get(path) || {};
+    const keys = el.dataset.sub.split('.');
+    const last = keys.pop();
+    let node = obj;
+    keys.forEach(k => { if (typeof node[k] !== 'object' || node[k] === null) node[k] = {}; node = node[k]; });
+    node[last] = isNumeric(el) ? (parseFloat(el.value) || 0) : el.value;
+    Config.set(path, obj);
+  } else if (el.dataset.list) {
+    Config.set(path, el.value.split(',').map(s => s.trim()).filter(Boolean));
+  } else if (el.dataset.lines) {
+    Config.set(path, lines(el.value));
+  } else if (el.dataset.numlist) {
+    // "all" keeps zeros (a growth curve may have one); the default drops them
+    // (a zero counter button is meaningless)
+    const keepZero = el.dataset.numlist === 'all';
+    Config.set(path, el.value.split(',').map(s => parseFloat(s.trim()))
+                             .filter(n => isFinite(n) && (keepZero || n !== 0)));
+  } else if (el.dataset.map) {
+    /* "key | value" per line, split on the FIRST pipe only — a value may hold
+       pipes of its own, which every calendar name in plan.calendars does. */
+    const out = {};
+    lines(el.value).forEach(l => {
+      const p = l.indexOf('|');
+      if (p < 0) return;
+      const k = l.slice(0, p).trim();
+      if (k) out[k] = l.slice(p + 1).trim();
+    });
+    Config.set(path, out);
+  } else if (el.dataset.pairs) {
+    const [a, b] = el.dataset.pairs.split(',');
+    Config.set(path, lines(el.value).map(l => {
+      const parts = l.split('|').map(x => x.trim());
+      return { [a]: parts[0], [b]: parts[1] || parts[0] };
+    }));
+  } else if (isNumeric(el)) {
+    Config.set(path, parseFloat(el.value) || 0);
+  } else {
+    Config.set(path, el.value);
+  }
+}
+
+view.addEventListener('input', e => {
+  const el = e.target;
+
+  // sliders: live, and the readout follows the thumb
+  if (el.dataset.pref && el.type === 'range') {
+    Prefs.set(el.dataset.pref, el.value);
+    const row = el.closest('.slider-row');
+    const out = row && row.querySelector('.slider-val');
+    if (out) {
+      out.classList.remove('is-auto');
+      out.textContent = readoutFor(el.dataset.pref, parseFloat(el.value));
+    }
+    return;
+  }
+  // free-text and colour fields commit as you type
+  if (el.dataset.cfg) { commitField(el); return; }
+  if (el.closest('[data-group]') && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) commitGroup(el);
+});
+
+view.addEventListener('change', e => {
+  const el = e.target;
+  // a select bound straight to a path (the streak rule) commits here — it does
+  // not reliably fire `input`, and its group's read() is a no-op
+  if (el.dataset.cfg) { commitField(el); return; }
+  if (el.tagName === 'SELECT' && el.closest('[data-group]')) { commitGroup(el); return; }
+  if (el.id === 'acc-color') {
+    Prefs.set('accentCustom', el.value);
+    const hex = $id('acc-hex'); if (hex) hex.value = el.value;
+    return;
+  }
+  if (el.id === 'acc-hex') {
+    const v = Prefs.normHex(el.value);
+    Prefs.set('accentCustom', v);
+    el.value = v;
+    const c = $id('acc-color'); if (c) c.value = v;
+    return;
+  }
+  /* a tab's own colour. The record holds only the tabs that have been picked,
+     so this merges rather than replaces — see the note on tabColors. */
+  if (el.dataset.tabColor) {
+    Prefs.set('tabColors', { ...(Prefs.get('tabColors') || {}), [el.dataset.tabColor]: el.value });
+    // that tab is no longer shipped-hue. Said in place rather than by
+    // re-rendering: the panel would be rebuilt under an open colour picker.
+    const tag = el.closest('.setting-row').querySelector('.setting-lbl small');
+    if (tag) tag.remove();
+    return;
+  }
+  /* A checkbox carrying data-pref: the delegated click path is for .tog
+     buttons, and a real checkbox reports through change instead. */
+  if (el.dataset && el.dataset.check && el.dataset.pref) { Prefs.set(el.dataset.pref, el.checked); return; }
+  if (el.id === 'cur-sym') Prefs.set('currency', el.value.slice(0, 3) || '€');
+});
+
+view.addEventListener('click', e => {
+  const t = e.target.closest('[data-pref],[data-toggle],[data-toggle-cfg],[data-theme-pick],[data-add],[data-del],[data-ed],[data-snd-kit],[data-snd-map],[data-key-cap],[data-cfg-reset],[data-cfg-toggle],[data-preset-shape],[data-preset-border],[data-pref-null],[data-app-toggle],[data-app-move],[data-act],[data-open],[data-cat],[data-seg]');
+  if (!t) return;
+
+  /* A switch inside a content editor. Editors commit on `change`, which a
+     button never fires, so the one thing this needs is to flip itself and then
+     ask the group to read — the same wholesale read every other field in the
+     editor goes through, so there is still no per-field state. */
+  if (t.dataset.toggleCfg) {
+    const on = !t.classList.contains('on');
+    t.classList.toggle('on', on);
+    t.setAttribute('aria-checked', String(on));
+    Prefs.tap();
+    commitGroup(t);
+    return;
+  }
+
+  // the home menu and the pill bar
+  if (t.dataset.open) { Prefs.tap(); Shell.open(t.dataset.open); return; }
+  if (t.dataset.cat)  { Prefs.tap(); cat(t.dataset.cat); return; }
+  if (t.dataset.seg)  { panel(t.dataset.seg); return; }
+
+  // the app list: switch an app's tab on or off, or move it — without the
+  // page jumping back to the top (the shell keeps the slide's scroll too)
+  if (t.dataset.appToggle) {
+    const a = t.dataset.appToggle, on = Prefs.get('apps');
+    const next = on.includes(a) ? on.filter(x => x !== a)
+               : Prefs.APPS.filter(x => on.includes(x) || x === a);   // re-enable in shipped order
+    if (!next.length) { Shell.toast('keep at least one app'); return; }
+    keepScroll(() => { Prefs.set('apps', next); Prefs.tap(); renderLayout(); }); return;
+  }
+  if (t.dataset.appMove) {
+    const [a, dir] = t.dataset.appMove.split(':');
+    const on = Prefs.get('apps'), i = on.indexOf(a), j = i + (+dir);
+    if (i < 0 || j < 0 || j >= on.length) return;
+    [on[i], on[j]] = [on[j], on[i]];
+    keepScroll(() => { Prefs.set('apps', on); renderLayout(); }); return;
+  }
+
+  // theme card
+  if (t.dataset.themePick) { Prefs.set('theme', t.dataset.themePick); Prefs.tap();
+    renderLook(); Shell.toast('theme · ' + Prefs.themeInfo().name); return; }
+
+  // toggle switch bound to a pref
+  if (t.dataset.toggle) { Prefs.set(t.dataset.pref, !Prefs.get(t.dataset.pref)); Prefs.tap();
+    render(); return; }
+
+  /* The sound chips play what they set, and they play it *after* the pref is
+     written so a kit chip is heard as the kit it just became. The map's chips
+     name their own voice, because `auto` has to be heard as whatever the kit
+     says rather than as silence. */
+  if (t.dataset.sndKit) {
+    Prefs.set('soundKit', t.dataset.sndKit); Prefs.tap(); render();
+    Prefs.sound((Prefs.SOUND_KITS[t.dataset.sndKit] || {}).tap || 'none');
+    return;
+  }
+  if (t.dataset.sndMap) {
+    Prefs.set(t.dataset.sndMap, t.dataset.val); Prefs.tap(); render();
+    Prefs.sound(t.dataset.sndVoice || 'none');
+    return;
+  }
+
+  // chip bound to a pref
+  if (t.dataset.pref && t.dataset.val !== undefined) {
+    Prefs.set(t.dataset.pref, t.dataset.val); Prefs.tap(); render(); return; }
+
+  // shape quick-picks
+  if (t.dataset.presetShape  !== undefined) { Prefs.set('radius', t.dataset.presetShape); renderLayout(); return; }
+  if (t.dataset.presetBorder !== undefined) { Prefs.set('border', t.dataset.presetBorder); renderLayout(); return; }
+  if (t.dataset.prefNull)                   { Prefs.reset(t.dataset.prefNull); renderLayout(); return; }
+
+  // content editors
+  /* The value is passed through: most editors add one thing and ignore it,
+     CREATE's adds a stage to the area the button names — or, from the button
+     at the bottom, a whole area. */
+  if (t.dataset.add) { const box = groupOf(t); EDITORS[box.dataset.group].add(t.dataset.add); renderContent(); return; }
+  /* An editor action that is neither an add nor a delete — CREATE's stage
+     palettes are the first. Nothing is confirmed: it changes six swatches that
+     are all still on screen and still editable. */
+  if (t.dataset.ed !== undefined) {
+    const box = groupOf(t); if (!box) return;
+    const ed = EDITORS[box.dataset.group];
+    if (ed && ed.act) { Prefs.tap(); ed.act(t.dataset.ed); renderContent(); }
+    return;
+  }
+  if (t.dataset.del !== undefined && groupOf(t)) {
+    const box = groupOf(t), which = t.dataset.del;
+    confirmed('Remove this?', () => { EDITORS[box.dataset.group].del(which); renderContent(); });
+    return;
+  }
+  if (t.dataset.cfgReset) {
+    const paths = RESET_BUNDLE[t.dataset.cfgReset] || [t.dataset.cfgReset];
+    confirmed('Put this section back to what ROOT ships with?', () => {
+      paths.forEach(p => Config.reset(p));
+      renderContent(); Shell.toast('reset to default');
+    });
+    return;
+  }
+  if (t.dataset.cfgToggle) {
+    const path = t.dataset.cfgToggle;
+    const i = path.lastIndexOf('.');
+    const branch = path.slice(0, i), key = path.slice(i + 1);
+    const obj = Config.get(branch) || {};
+    /* Flip what the switch is *showing*. An override is stored whole-branch,
+       so one written before this key shipped has no answer for it and reads
+       as undefined — which the panel draws from the default. Without the same
+       fallback here the first tap would set it to what it already showed and
+       do nothing visible. */
+    const cur = obj[key] !== undefined ? obj[key] : (Config.defaults(branch) || {})[key];
+    obj[key] = !cur;
+    Config.set(branch, obj);
+    renderContent(); return;
+  }
+
+  // panel-level actions
+  if (t.dataset.act === 'reset-appearance') {
+    confirmed('Reset every appearance setting?', () => {
+      ['theme','themeMode','themeDark','themeLight','accent','accentCustom','displayFont','monoFont',
+       'depth','texture','motion','motionSpeed','navMotion','contrast','caps','navStyle',
+       'navShape','navAnim','tabPalette','tabColors','tabAccent','cardStyle',
+       'accentUse','radius','border',
+       'density','iconStroke','chromeAlpha','contentWidth','textureAmount','titleSize','hdTitleSize','bandMark',
+       'bandDrop','navHeight','navRadius','navIcon','desktopMode','frameW','frameH',
+       'showTabLabels','accentGlow','monoNumbers','colorfulTabs','chromeBlur','apps'].forEach(k => Prefs.reset(k));
+      render(); Shell.toast('appearance reset');
+    });
+  }
+  if (t.dataset.act === 'reset-behaviour') {
+    confirmed('Reset every behaviour setting?', () => {
+      ['startTab','swipe','swipeStrength','autoHideChrome','haptics','sounds','soundLevel',
+       'soundKit','sndTap','sndNav','sndMenu','sndDone','sndMsg',
+       'confirmDestructive','numpad',
+       'toastMs','undoSec','undoIcon','undoText','keyboardNav','keyMap','kbMark','lockPortrait','syncTodayPrivate',
+       'dateFormat','weekStart','currency'].forEach(k => Prefs.reset(k));
+      render(); Shell.toast('behaviour reset');
+    });
+  }
+  if (t.dataset.act === 'reset-content') {
+    Shell.ask({ title: 'Discard every content edit?',
+                body: 'Everything goes back to what ROOT ships with. Your logged days, lists and history are untouched.',
+                yes: 'discard', danger: true,
+                done: a => { if (!a) return; Config.resetAll(); renderData(); Shell.toast('content reset'); } });
+  }
+  if (t.dataset.act === 'reset-tab-colors') {
+    keepScroll(() => { Prefs.reset('tabColors'); Prefs.tap(); renderLayout(); }); return;
+  }
+  if (t.dataset.act === 'sync-now')          { syncNow(t); return; }
+  if (t.dataset.act === 'sync-push-todoist') { syncPushTodoist(t); return; }
+  if (t.dataset.act === 'sync-pull-todoist') { syncPullTodoist(t); return; }
+  if (t.dataset.act === 'sync-push-file')    { syncPushFile(); return; }
+  if (t.dataset.act === 'sync-pull-file')    { syncPickFile(); return; }
+  if (t.dataset.act === 'sync-push-all')     { syncPushAll(t); return; }
+  if (t.dataset.act === 'sync-pull-all')     { syncPickAll(); return; }
+  if (t.dataset.act === 'sync-undo')         { syncUndo(); return; }
+  if (t.dataset.act === 'set-keys') { setAllKeys(t); return; }
+  if (t.dataset.act === 'reset-keymap') {
+    keepScroll(() => { Prefs.reset('keyMap'); Prefs.tap(); renderBehave(); }); return;
+  }
+  if (t.dataset.keyCap) { captureKey(t); return; }
+  if (t.dataset.act === 'search') { Prefs.tap(); if (window.SEARCH) SEARCH.open(); }
+  if (t.dataset.act === 'export-look') exportLook();
+  if (t.dataset.act === 'import-look') importLook();
+});
+
+/* Preview the theme under the pointer, and put the saved one back on leaving.
+   Mouse only: a finger scrolling the gallery fires pointerover on whatever card
+   it crosses, and :hover then sticks to the last one it lifted from, so the
+   preview was applied and never reverted — the look changed to a theme that
+   was neither chosen nor shown as selected. Touch gets no preview; a tap picks. */
+const isMouse = e => !e.pointerType || e.pointerType === 'mouse';
+view.addEventListener('pointerover', e => {
+  if (!isMouse(e)) return;
+  const c = e.target.closest && e.target.closest('[data-theme-pick]');
+  if (c) Prefs.preview(c.dataset.themePick);
+});
+view.addEventListener('pointerout', e => {
+  if (!isMouse(e)) return;
+  const c = e.target.closest && e.target.closest('[data-theme-pick]');
+  if (c && !view.querySelector('[data-theme-pick]:hover')) Prefs.revert();
+});
+view.addEventListener('pointercancel', () => Prefs.revert());
+
+function readoutFor(key, v) {
+  const s = Prefs.SCHEMA[key];
+  if (key === 'toastMs')       return (v / 1000).toFixed(1) + 's';
+  if (key === 'undoSec')       return +v ? v + 's' : 'until you tap it';
+  if (key === 'swipeStrength') return Math.round(v * 100) + '% of the width';
+  if (key === 'iconStroke')    return v.toFixed(1);
+  if (['density','textureAmount','chromeAlpha'].includes(key)) return Math.round(v * 100) + '%';
+  return v + (s.unit || '');
+}
+
+/* The settings view's own confirms. It is Shell.confirm — which already reads
+   "confirm before clearing" — kept behind a local name because that is what
+   every call site here says. */
+const confirmed = (msg, onOk) => Shell.confirm(msg, onOk);
+
+/* A content edit changes what the apps draw; each module re-renders itself on
+   its own Config.subscribe. This only keeps the settings screen honest about
+   which sections now count as customised. */
+Config.subscribe(() => {
+  dropIndex();
+  $all('[data-cfg-reset]').forEach(b => {
+    const paths = RESET_BUNDLE[b.dataset.cfgReset] || [b.dataset.cfgReset];
+    b.classList.toggle('hidden', !paths.some(p => Config.isCustom(p)));
+  });
+});
+// the home menu lists the apps out of the bar: keep it current
+Prefs.subscribe(k => { if ((k === 'apps' || k === '*') && currentCat === null) renderHome(); });
+
+/* A run that happened on its own still has to show on the section in front of
+   you — "sent 4 min ago" going stale is how an automatic sync looks broken. */
+if (window.SYNC && SYNC.onAuto) SYNC.onAuto(res => {
+  if (currentPanel === 'sync') renderSync();
+  /* An automatic run never takes the page away from under you: it says what it
+     took in and leaves the reload to you. */
+  if (res && res.imported) Shell.toast('sync took in ' + res.imported + ' — reload to see them');
+});
+
+Shell.register('settings', { onShow: render, home });   // the settings tab tapped while here: the menu
+// a deep link (#settings/data) opens on that panel; anything else on the home menu
+const linked = Shell.hashTarget();
+if (linked.name === 'settings' && PANELS.includes(linked.sub)) panel(linked.sub); else home();
+
+return { panel, home, cat, render, saveToken, testToken, renderStorage, renderData,
+         exportAll, pickImport, importAll, exportLook, importLook,
+         syncReadFile, syncReadAll, renderSync, syncNow,
+         searchIndex, dropIndex, PANELS, SEG_NAMES, APP_NAMES,
+         reload: () => location.reload() };
+})();

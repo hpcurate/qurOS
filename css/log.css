@@ -1,0 +1,457 @@
+/* LOG forms, calendar, charts and reports. */
+
+.ns-log .scr{display:none;min-height:100%;padding-bottom:var(--scr-pad-b)}
+.ns-log .scr.on{display:block}
+.ns-log .hd{position:sticky;top:0;background:var(--bg);border-bottom:var(--bw) solid var(--bd);
+    padding:calc(var(--hd-pad) + var(--sat)) 18px var(--hd-pad);
+    display:flex;align-items:center;gap:calc(14px * var(--dens));z-index:10}
+.ns-log .hd-back{background:none;border:none;color:var(--y);font:400 12px/1 var(--mono);cursor:pointer;letter-spacing:.06em;padding:calc(4px * var(--dens)) 0}
+.ns-log .hd-title{font:800 var(--hd-title-px)/1 var(--head);letter-spacing:.1em;text-transform:var(--caps);text-shadow:var(--title-sh-x) 0 0 var(--title-sh-c)}
+
+/* Home ──
+   The band's box is shell.css's, shared by all eight apps; this is the date
+   row's own type and the wordmark's weight. */
+.ns-log .h-meta{font:700 10px/1 var(--head);letter-spacing:.16em;text-transform:var(--caps);color:var(--tx-2)}
+.ns-log .h-date-txt{flex:1}
+/* Date arrows share the title weight, ink and locally composed shadow.
+   Typed arrows may use a fallback font when the display face lacks the glyphs. */
+.ns-log .h-arr{background:none;border:none;color:var(--tx);
+  font:800 13px/1 var(--head);
+  text-shadow:var(--title-sh-x) 0 0 var(--title-sh-c);
+  cursor:pointer;padding:calc(2px * var(--dens)) calc(6px * var(--dens));transition:color .12s,opacity .26s ease}
+.ns-log .h-arr:active{color:var(--y)}
+/* The arrows step aside, the way DAY's stepper does
+   Same rule and the same dial (`calStepsHide`): they are controls you use in
+   bursts and then stop using, and a pair of chevrons sitting over a day you are
+   reading is a pair of chevrons in the way. They fade rather than being removed,
+   because removing them would move the date under them.
+
+   They come back on any touch on LOG — LOG.wakeArrows(), the twin of CAL's
+   wakeSteps() — so getting them back is not a thing you have to aim at. */
+.ns-log .h-meta.idle .h-arr,
+.ns-log .h-meta.idle .h-today{opacity:0;pointer-events:none}
+.ns-log .h-today{background:none;border:var(--bw) solid var(--bd);border-radius:var(--r1);color:var(--tx-2);font:400 8px/1 var(--mono);
+         letter-spacing:.08em;cursor:pointer;padding:calc(3px * var(--dens)) calc(6px * var(--dens));transition:all .12s}
+.ns-log .h-today:active{color:var(--y);border-color:var(--y)}
+.ns-log .h-today.hidden{display:none}
+.ns-log .h-logo-row{display:flex;align-items:center;justify-content:space-between;gap:calc(14px * var(--dens))}
+.ns-log .h-logo{font-weight:800;font-family:var(--head);letter-spacing:-.02em}
+.ns-log .h-logo em{font-style:normal}
+
+/* The big day-number at the other end of the wordmark's row is the shell's —
+   DAY carries the same one, and the point of it is that the two are identical.
+   Its box, its type and its shuffle are all in shell.css. */
+
+.ns-log .h-streak{font:400 10px/1 var(--mono);letter-spacing:.1em;color:var(--mu);padding:0 calc(18px * var(--dens)) calc(24px * var(--dens));min-height:20px}
+.ns-log .h-streak em{color:var(--y);font-style:normal}
+
+/* Fit the month, fortnight and doors into the home height. Below 560px,
+   restore normal flow and scrolling to avoid clipping content. */
+@media (min-height:560px){
+  .ns-log #s-home.on{display:flex;flex-direction:column;height:100%;overflow:hidden}
+  .ns-log #s-home .lc{flex:1 1 auto;min-height:0}
+  .ns-log #s-home .grid{flex:0 0 auto}
+}
+/* below that the home flows again, and the opened chart needs a height of its
+   own since there is no leftover space to fill */
+@media (max-height:559px){
+  .ns-log .lc-trend.big .lc-plot{height:190px}
+}
+
+/* The month ── */
+.ns-log .lc{padding:0 calc(18px * var(--dens)) calc(14px * var(--dens));
+  display:flex;flex-direction:column;min-height:0}
+.ns-log .lc-head{display:flex;align-items:center;justify-content:space-between;
+  gap:calc(8px * var(--dens));margin-bottom:calc(8px * var(--dens));flex:0 0 auto}
+.ns-log .lc-month{font:700 10px/1 var(--head);letter-spacing:.14em;text-transform:var(--caps);color:var(--mu)}
+.ns-log .lc-arr{background:none;border:none;color:var(--mu);cursor:pointer;padding:calc(4px * var(--dens));
+  line-height:0;transition:color var(--dur-1)}
+.ns-log .lc-arr svg{width:13px;height:13px;display:block}
+.ns-log .lc-arr:active{color:var(--y)}
+.ns-log .lc-arr:disabled{opacity:.25;pointer-events:none}
+/* The entries switch. It sits in the head with the month and the arrows because
+   it is about how the grid reads, not about which month is in it — and it is a
+   word rather than a glyph, since "entries" is what it turns the cells into. */
+.ns-log .lc-tog{background:none;border:max(.5px, calc(var(--bw) * .5)) solid var(--bd);
+  border-radius:var(--r1);color:var(--mu);cursor:pointer;
+  padding:calc(3px * var(--dens)) calc(7px * var(--dens));
+  font:700 8.5px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;
+  transition:color var(--dur-1),border-color var(--dur-1),background var(--dur-1)}
+.ns-log .lc-tog:active{background:var(--press)}
+.ns-log .lc-tog.on{color:var(--bg);background:var(--tx);border-color:var(--tx)}
+/* Counting, the number carries the weight the date does not: a blank cell is
+   "no entries" and needs no styling of its own. */
+.ns-log .lc-c.count{font-weight:400;color:var(--mu)}
+.ns-log .lc-c.count.has{font-weight:700;color:var(--tx)}
+
+.ns-log .lc-grid{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:repeat(7,1fr);
+  grid-auto-rows:minmax(0,1fr);gap:calc(3px * var(--dens))}
+.ns-log .lc-h{display:flex;align-items:center;justify-content:center;
+  font:400 7.5px/1 var(--mono);letter-spacing:.1em;text-transform:var(--caps);color:var(--bd-2);
+  max-height:14px}
+/* A cell says how much of that day was written: nothing, one half, both.
+   Its border is a **hairline** — half the app's border weight, floored at
+   .5px, which is one physical pixel on any phone. Forty-two boxes at the full
+   weight is a lattice, and the lattice was the loudest thing on the screen;
+   at half of it the grid reads as ruling rather than as a grid of buttons.
+   Still a ratio of --bw, not a literal, so the Border weight dial reaches it
+   like everything else (§4). */
+.ns-log .lc-c{display:flex;align-items:center;justify-content:center;min-width:0;
+  background:var(--s1);border:max(.5px, calc(var(--bw) * .5)) solid var(--bd);
+  border-radius:var(--r1);
+  color:var(--mu);font:700 9.5px/1 var(--mono);cursor:pointer;padding:0;
+  transition:background .12s,border-color .12s,color .12s}
+.ns-log .lc-c.pad{background:none;border-color:transparent;pointer-events:none}
+/* A written day is a **tint**, not a fill. A solid accent block was the
+   brightest thing on the screen by a distance, and a month of them read as a
+   warning rather than as a record. The border carries the state; the wash only
+   grades it, so a full day is a step up from a half day rather than a different
+   material. */
+.ns-log .lc-c.f1{background:color-mix(in srgb,var(--y) 12%,var(--s1));
+  border-color:color-mix(in srgb,var(--y) 40%,var(--bd));color:var(--tx)}
+.ns-log .lc-c.f2{background:color-mix(in srgb,var(--y) 26%,var(--s1));
+  border-color:color-mix(in srgb,var(--y) 70%,var(--bd));color:var(--tx)}
+.ns-log .lc-c.future{opacity:.3;pointer-events:none}
+.ns-log .lc-c.today{border-color:var(--y)}
+/* Declare selection after f1/f2 so inverted colours override written-day tints. */
+.ns-log .lc-c.sel{background:var(--tx);border-color:var(--tx);color:var(--bg);box-shadow:none}
+.ns-log .lc-c:active{background:var(--press)}
+
+/* Fortnight dots distinguish missing readings from recorded days. Series
+   colours remain separate across themes. */
+/* Since 4.1 the colour of a line is written onto its <g> as --s-c by log.js,
+   so there is one rule per shape rather than one per series and a seventh
+   chart needs nothing here. --lc-yax is the gutter the labels sit in. */
+.ns-log .lc-trend{flex:0 0 auto;margin-top:calc(12px * var(--dens));
+  -webkit-tap-highlight-color:transparent;--lc-yax:16px}
+.ns-log .lc-trend.empty{font:400 9px/1.5 var(--mono);color:var(--bd-2);letter-spacing:.04em;text-align:center;
+  padding:calc(10px * var(--dens)) 0 0;cursor:default}
+.ns-log .lc-plot{display:flex;align-items:stretch;min-height:0;position:relative;
+  background:none;border:none;padding:0;width:100%;cursor:pointer}
+.ns-log .lc-spark{display:block;flex:1;min-width:0;width:100%;height:58px;overflow:visible}
+
+/* Opened over the month
+   Tapping the chart puts it where the calendar was. It is the same chart — the
+   same series, the same dots — with the room to carry axes, which is most of
+   what makes a chart answerable: a line that rose is worth less than a line
+   that rose from 2 to 4 on the ninth. The month is one tap away and the key
+   row says "close" where it said "14d", so there is no hidden state.
+
+   The grow is deliberately small. It is the same object gaining room, not a
+   panel arriving, and a big scale would say the opposite. */
+.ns-log .lc.big{justify-content:flex-start}
+.ns-log .lc-trend.big{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;
+  margin-top:0;animation:lc-open var(--dur-3) var(--ease) both}
+@keyframes lc-open{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:none}}
+.ns-log .lc-trend.big .lc-plot{flex:1 1 auto}
+.ns-log .lc-trend.big .lc-spark{height:auto}
+/* the axes are HTML, not SVG text: the viewBox is stretched to fill the width,
+   so a <text> inside it would be stretched with it */
+.ns-log .lc-yax{position:relative;flex:0 0 var(--lc-yax);min-width:0}
+.ns-log .lc-yax span{position:absolute;right:calc(5px * var(--dens));transform:translateY(-50%);
+  font:400 7.5px/1 var(--mono);color:var(--bd-2);letter-spacing:.04em}
+.ns-log .lc-xax{position:relative;height:12px;margin-left:var(--lc-yax);flex:0 0 auto}
+.ns-log .lc-xax span{position:absolute;top:3px;transform:translateX(-50%);
+  font:400 7.5px/1 var(--mono);color:var(--bd-2);letter-spacing:.02em}
+.ns-log .lc-g{stroke:var(--bd);stroke-width:1;vector-effect:non-scaling-stroke;fill:none;opacity:.5}
+.ns-log .lc-trend.big .lc-key{margin-left:var(--lc-yax)}
+.ns-log .lc-l{fill:none;stroke-width:1.4;vector-effect:non-scaling-stroke;
+  stroke-linecap:round;stroke-linejoin:round;opacity:.85}
+/* a dot is a zero-length path with a round cap — a circle whose size is the
+   stroke width in screen pixels, so the stretched viewBox cannot flatten it */
+.ns-log .lc-d,.ns-log .lc-dh{fill:none;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.ns-log .lc-dh{stroke:var(--s1);stroke-width:6.5}
+.ns-log .lc-d{stroke-width:4.5}
+.ns-log .lc-l{stroke:var(--s-c,var(--y))}
+.ns-log .lc-d{stroke:var(--s-c,var(--y))}
+/* "close" in the corner of the opened chart. The plot is the button that shuts
+   it, and this is the word that says so — it only exists while it is open. */
+.ns-log .lc-shut{position:absolute;top:0;right:0;font:400 8px/1 var(--mono);letter-spacing:.1em;
+  text-transform:var(--caps);color:var(--bd-2);pointer-events:none}
+/* The key is the cycle
+   It names the series, which makes it the one place on the chart where "these,
+   or a different set" is already the question. Tapping it moves to the next
+   chart; the plot keeps opening over the month. Two controls, two elements —
+   a corner button on the plot would have been a third thing to aim at on a
+   fortnight that is 58px tall. */
+.ns-log .lc-key{display:flex;align-items:baseline;flex-wrap:wrap;
+  gap:calc(4px * var(--dens)) calc(9px * var(--dens));margin-top:calc(6px * var(--dens));
+  width:100%;background:none;border:none;padding:calc(3px * var(--dens)) 0;cursor:pointer;text-align:left}
+.ns-log .lc-kk{display:flex;align-items:center;gap:4px;
+  font:400 8px/1 var(--mono);letter-spacing:.1em;text-transform:var(--caps);color:var(--mu)}
+/* the key's swatch is the same dot the chart draws, so the two are read together */
+.ns-log .lc-kk::before{content:'';width:6px;height:6px;border-radius:50%;flex:0 0 auto;
+  background:var(--s-c,var(--y))}
+.ns-log .lc-kk b{font-weight:700;color:var(--tx);margin-left:3px}
+.ns-log .lc-key:active .lc-kn{color:var(--y)}
+.ns-log .lc-kn{margin-left:auto;font:400 8px/1 var(--mono);letter-spacing:.1em;
+  text-transform:var(--caps);color:var(--bd-2)}
+
+/* Grid ── */
+.ns-log .grid{display:grid;grid-template-columns:1fr 1fr;gap:calc(6px * var(--dens));padding:0 calc(18px * var(--dens))}
+.ns-log .card{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);padding:calc(13px * var(--dens)) calc(13px * var(--dens)) calc(12px * var(--dens));
+      cursor:pointer;position:relative;transition:border-color .12s;user-select:none}
+.ns-log .card:active{background:var(--press)}
+.ns-log .card.done{border-color:var(--y)}
+.ns-log .card.done::after{content:'✓';position:absolute;top:11px;right:13px;font:11px/1 var(--mono);color:var(--y)}
+.ns-log .card-t{font:700 12px/1 var(--head);letter-spacing:.08em;text-transform:var(--caps);margin-bottom:4px}
+.ns-log .card-s{font:400 9px/1.35 var(--mono);color:var(--mu);letter-spacing:.04em;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ns-log .full{grid-column:1/-1}
+.ns-log .muted{border-color:transparent!important;padding:calc(9px * var(--dens)) calc(13px * var(--dens))}
+.ns-log .muted .card-t{font:400 10px/1 var(--mono);color:var(--mu);letter-spacing:.06em;text-transform:none;margin-bottom:0}
+
+/* Content ── */
+.ns-log .cnt{padding:calc(18px * var(--dens))}
+.ns-log .f{margin-bottom:17px}
+.ns-log .lbl{display:block;font:400 9px/1 var(--mono);letter-spacing:.14em;text-transform:var(--caps);color:var(--mu);margin-bottom:7px}
+.ns-log .lbl-hint{font:400 9px/1 var(--mono);color:var(--mu);opacity:.55;letter-spacing:.04em}
+.ns-log input[type=text],.ns-log input[type=number],.ns-log input[type=time],.ns-log textarea{
+  width:100%;background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+  color:var(--tx);font:400 15px/1 var(--mono);padding:calc(12px * var(--dens)) calc(13px * var(--dens));outline:none;
+  -webkit-appearance:none;appearance:none;transition:border-color .12s}
+.ns-log input:focus,.ns-log textarea:focus{border-color:var(--y)}
+.ns-log textarea{resize:none;line-height:1.65;min-height:90px}
+.ns-log input[type=number]::-webkit-inner-spin-button,
+.ns-log input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none}
+
+/* Scales & toggles ── */
+/* 1–5 scale: enough resolution to show movement, few enough to answer fast.
+   Colour runs red→green by position, so the selected value reads at a glance. */
+.ns-log .sc{display:grid;grid-template-columns:repeat(5,1fr);gap:calc(5px * var(--dens))}
+.ns-log .sc-b{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);color:var(--mu);
+      font:400 15px/1 var(--mono);padding:calc(13px * var(--dens)) calc(4px * var(--dens));cursor:pointer;transition:all .1s}
+.ns-log .sc-b:nth-child(1){--sc-c:#e06060;--sc-bg:rgba(224,96,96,.13)}
+.ns-log .sc-b:nth-child(2){--sc-c:#e0895a;--sc-bg:rgba(224,137,90,.13)}
+.ns-log .sc-b:nth-child(3){--sc-c:#ddb257;--sc-bg:rgba(221,178,87,.13)}
+.ns-log .sc-b:nth-child(4){--sc-c:#a8c95e;--sc-bg:rgba(168,201,94,.13)}
+.ns-log .sc-b:nth-child(5){--sc-c:#5cdb7d;--sc-bg:rgba(92,219,125,.13)}
+/* stress is the one scale where high is bad, so its ramp runs the other way:
+   green at 1 (calm) → red at 5 (overwhelmed) */
+.ns-log #sc-stress .sc-b:nth-child(1){--sc-c:#5cdb7d;--sc-bg:rgba(92,219,125,.13)}
+.ns-log #sc-stress .sc-b:nth-child(2){--sc-c:#a8c95e;--sc-bg:rgba(168,201,94,.13)}
+.ns-log #sc-stress .sc-b:nth-child(3){--sc-c:#ddb257;--sc-bg:rgba(221,178,87,.13)}
+.ns-log #sc-stress .sc-b:nth-child(4){--sc-c:#e0895a;--sc-bg:rgba(224,137,90,.13)}
+.ns-log #sc-stress .sc-b:nth-child(5){--sc-c:#e06060;--sc-bg:rgba(224,96,96,.13)}
+.ns-log .sc-b.on{background:var(--sc-bg);border-color:var(--sc-c);color:var(--sc-c)}
+.ns-log .sc-ends{display:flex;justify-content:space-between;margin-top:6px;
+         font:400 8px/1 var(--mono);letter-spacing:.08em;color:var(--mu);opacity:.7}
+
+/* Meds: one toggle per drug, selected = taken ── */
+.ns-log .med-g{display:grid;grid-template-columns:1fr 1fr;gap:calc(5px * var(--dens))}
+.ns-log .med-b{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);color:var(--mu);
+       padding:calc(12px * var(--dens)) calc(6px * var(--dens)) calc(10px * var(--dens));cursor:pointer;text-align:center;transition:all .1s;
+       display:flex;flex-direction:column;align-items:center;gap:calc(5px * var(--dens))}
+.ns-log .med-name{font:400 11px/1 var(--mono);letter-spacing:.05em}
+.ns-log .med-state{font:400 8px/1 var(--mono);letter-spacing:.12em;text-transform:var(--caps);opacity:.6}
+/* One rule, not one per key: log.js writes --med-c from log.medColors, so every
+   slot — including a fourth one added later — is highlighted in its own colour
+   without a selector being added here. */
+.ns-log .med-b.on{background:color-mix(in srgb,var(--med-c,var(--y)) 12%,transparent);
+       border-color:var(--med-c,var(--y));color:var(--med-c,var(--y))}
+
+/* Meals: same yes/no behaviour, one per meal ── */
+.ns-log .meal-g{display:grid;grid-template-columns:repeat(4,1fr);gap:calc(5px * var(--dens))}
+.ns-log .meal-b{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);color:var(--mu);
+        font:400 11px/1 var(--mono);letter-spacing:.04em;padding:calc(14px * var(--dens)) calc(2px * var(--dens));cursor:pointer;
+        text-align:center;transition:all .1s}
+.ns-log .meal-b.on{background:var(--yd);border-color:var(--y);color:var(--y)}
+.ns-log .wo4{display:grid;grid-template-columns:repeat(4,1fr);gap:calc(5px * var(--dens))}
+.ns-log .wo4-b{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);color:var(--mu);
+       font:400 12px/1 var(--mono);letter-spacing:.05em;padding:calc(13px * var(--dens)) calc(4px * var(--dens));cursor:pointer;text-align:center;transition:all .1s}
+.ns-log .wo4-b.on{background:var(--yd);border-color:var(--y);color:var(--y)}
+.ns-log .wo4-b.rest-on{background:rgba(60,60,60,.25);border-color:#3a3a3a;color:#555}
+.ns-log .blk-g{display:grid;grid-template-columns:repeat(3,1fr);gap:calc(5px * var(--dens))}
+.ns-log .blk-b{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);color:var(--mu);
+       font:400 11px/1 var(--mono);letter-spacing:.06em;padding:calc(12px * var(--dens)) calc(4px * var(--dens));cursor:pointer;text-align:center;transition:all .1s}
+/* one colour per block; mixing/production/content deliberately reuse the
+   three curate-output purples, since they are the same three streams */
+.ns-log .blk-b.on{background:var(--blk-bg);border-color:var(--blk-c);color:var(--blk-c)}
+/* PLAN's queued/sent tasks, offered as blocks: the task name, then the
+   project and time block it was planned under. Since 4.1 these come *first* —
+   they are what the evening is nearly always made of — and the nine standing
+   blocks are folded away underneath. */
+.ns-log .blk-plan-lbl{margin-top:calc(10px * var(--dens))}
+/* the fold's own row: a label on the left that reads like every other .lbl,
+   and the word that says what a tap will do on the right */
+.ns-log .blk-fold{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;
+  background:none;border:none;padding:calc(10px * var(--dens)) 0 calc(7px * var(--dens));cursor:pointer;
+  font:400 9px/1 var(--mono);letter-spacing:.14em;text-transform:var(--caps);color:var(--mu);text-align:left}
+.ns-log #blk-plan-wrap:not(.hidden) + .blk-fold{border-top:var(--bw) solid var(--bd);
+  margin-top:calc(12px * var(--dens))}
+.ns-log .blk-fold b{flex:0 0 auto;font-weight:400;color:var(--tx-2);letter-spacing:.08em}
+.ns-log .blk-fold:active b{color:var(--y)}
+.ns-log .blk-b.plan{display:flex;flex-direction:column;gap:3px;align-items:center;text-align:center;
+  white-space:normal;overflow-wrap:anywhere;min-height:0}
+.ns-log .blk-b.plan small{font:400 8px/1.2 var(--mono);letter-spacing:.06em;opacity:.7;text-transform:none}
+.ns-log .cs-tog{display:grid;grid-template-columns:1fr 1fr;gap:calc(5px * var(--dens))}
+.ns-log .cs-tog-b{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);color:var(--mu);
+          font:400 11px/1 var(--mono);letter-spacing:.08em;padding:calc(12px * var(--dens)) calc(8px * var(--dens));cursor:pointer;text-align:center;transition:all .1s}
+.ns-log .cs-tog-b.on{background:var(--yd);border-color:var(--y);color:var(--y)}
+
+/* Counters ── */
+.ns-log .caf-row{display:grid;grid-template-columns:1fr 1fr;gap:calc(5px * var(--dens));margin-bottom:6px}
+/* half-height: number and label side by side instead of stacked */
+.ns-log .caf-b{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);color:var(--mu);
+       padding:calc(9px * var(--dens)) calc(8px * var(--dens));cursor:pointer;text-align:center;transition:all .1s;
+       display:flex;flex-direction:row;align-items:center;justify-content:center;gap:calc(7px * var(--dens))}
+.ns-log .caf-b.on{background:var(--yd);border-color:var(--y)}
+.ns-log .caf-b .cnt-n{font-size:16px}
+.ns-log .cnt-n{font:700 24px/1 var(--mono);color:var(--mu);transition:color .1s}
+.ns-log .caf-b.on .cnt-n{color:var(--y)}
+.ns-log .cnt-l{font:400 9px/1 var(--mono);letter-spacing:.1em;text-transform:var(--caps);color:var(--mu)}
+/* The accent, not a literal. This was rgba(167,139,250,.6) - VOID's violet,
+   frozen in at 1.0 - so on every other preset the label under a selected coffee
+   or energy drink stayed violet while its own border and number had already
+   gone to the theme's accent. The currency counters below had always done it
+   correctly; this is the same shape as those. */
+.ns-log .caf-b.on .cnt-l{color:var(--y);opacity:.6}
+.ns-log .caf-reset{width:100%;background:transparent;border:var(--bw) solid var(--bd);border-radius:var(--r1);
+           color:var(--mu);font:400 9px/1 var(--mono);letter-spacing:.1em;text-transform:var(--caps);
+           padding:calc(9px * var(--dens));cursor:pointer;transition:background .12s}
+.ns-log .caf-reset:active{background:var(--press)}
+/* Curate output: three counters, one purple shade each ── */
+.ns-log .cur-g{display:grid;grid-template-columns:repeat(3,1fr);gap:calc(5px * var(--dens));margin-bottom:6px}
+.ns-log .cur-b{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);color:var(--mu);
+       padding:calc(13px * var(--dens)) calc(6px * var(--dens)) calc(11px * var(--dens));cursor:pointer;text-align:center;transition:all .1s;
+       display:flex;flex-direction:column;align-items:center;gap:calc(5px * var(--dens))}
+.ns-log .cur-b.on{background:var(--cur-bg);border-color:var(--cur-c)}
+.ns-log .cur-b.on .cnt-n{color:var(--cur-c)}
+.ns-log .cur-b.on .cnt-l{color:var(--cur-c);opacity:.7}
+.ns-log .cur-reset{width:100%;background:transparent;border:var(--bw) solid var(--bd);border-radius:var(--r1);
+           color:var(--mu);font:400 9px/1 var(--mono);letter-spacing:.1em;text-transform:var(--caps);
+           padding:calc(9px * var(--dens));cursor:pointer;transition:background .12s}
+.ns-log .cur-reset:active{background:var(--press)}
+
+/* Misc layout ── */
+.ns-log .sec{font:700 10px/1 var(--head);letter-spacing:.15em;text-transform:var(--caps);color:var(--y);
+     margin:24px 0 14px;padding-bottom:calc(8px * var(--dens));border-bottom:var(--bw) solid var(--bd)}
+.ns-log hr{border:none;border-top:var(--bw) solid var(--bd);margin:6px 0 18px}
+.ns-log .btn{width:100%;background:var(--y);border:none;border-radius:var(--r1);color:var(--on-y);
+     font:700 14px/1 var(--head);letter-spacing:.1em;text-transform:var(--caps);
+     padding:calc(15px * var(--dens));cursor:pointer;margin-top:6px;transition:opacity .15s}
+.ns-log .btn:active{opacity:.82}
+.ns-log .btn-danger{background:var(--re);color:#fff}
+.ns-log .btn-2{background:var(--s2);color:var(--tx);border:var(--bw) solid var(--bd)}
+
+/* Entries ── */
+.ns-log .e-item{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);padding:calc(11px * var(--dens)) calc(13px * var(--dens));
+        margin-bottom:9px;display:grid;grid-template-columns:1fr auto;gap:calc(10px * var(--dens));align-items:start}
+.ns-log .e-body{min-width:0}
+.ns-log .e-time{font:400 9px/1 var(--mono);letter-spacing:.1em;color:var(--y);margin-bottom:6px}
+.ns-log .e-txt{font:400 12px/1.65 var(--mono);color:var(--tx);word-break:break-word}
+.ns-log .e-del{background:none;border:none;color:var(--mu);font:400 14px/1 var(--mono);cursor:pointer;padding:calc(2px * var(--dens)) 0 calc(2px * var(--dens)) calc(4px * var(--dens));transition:color .12s}
+.ns-log .e-del:active{color:var(--re)}
+.ns-log .e-none{color:var(--mu);font-size:12px;text-align:center;padding:calc(40px * var(--dens)) 0}
+
+/* Output ── */
+.ns-log .out-tags{display:flex;gap:calc(7px * var(--dens));margin-bottom:14px;flex-wrap:wrap}
+.ns-log .out-tag{font:400 9px/1 var(--mono);letter-spacing:.08em;padding:calc(5px * var(--dens)) calc(9px * var(--dens));border-radius:var(--r1)}
+.ns-log .out-tag.ok{background:rgba(92,219,125,.1);color:var(--gr);border:var(--bw) solid rgba(92,219,125,.3)}
+.ns-log .out-tag.no{background:rgba(60,60,60,.15);color:var(--mu);border:var(--bw) solid var(--bd)}
+/* white-space:pre means the note is read by scrolling sideways, which the shell's
+   swipe handler already steps aside for — but #track claims pan-y, and gestures
+   intersect touch-action up the ancestor chain, so pan-x has to be handed back
+   here or the pane is unscrollable by finger and the swipe declines to act too. */
+.ns-log .out-pre{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);padding:calc(13px * var(--dens));
+         font:400 11px/1.75 var(--mono);color:#777;white-space:pre;overflow-x:auto;
+         touch-action:pan-x pan-y;
+         max-height:280px;overflow-y:auto;margin-bottom:14px}
+.ns-log .btn-share{width:100%;background:var(--y);border:none;border-radius:var(--r1);color:var(--on-y);
+           font:700 15px/1 var(--head);letter-spacing:.1em;text-transform:var(--caps);
+           padding:calc(16px * var(--dens));cursor:pointer;margin-bottom:8px;transition:opacity .15s}
+.ns-log .btn-share:active{opacity:.82}
+.ns-log .btn-copy{width:100%;background:var(--s2);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+          color:var(--tx);font:400 11px/1 var(--mono);letter-spacing:.08em;
+          padding:calc(10px * var(--dens));cursor:pointer;transition:all .12s}
+.ns-log .btn-copy:active{background:var(--yd);border-color:var(--y)}
+.ns-log .btn-copy.ok{color:var(--gr);border-color:var(--gr)}
+
+/* History ── */
+.ns-log .hist-day{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);padding:calc(14px * var(--dens));margin-bottom:9px}
+.ns-log .hist-date{font:700 11px/1 var(--head);letter-spacing:.1em;color:var(--y);margin-bottom:12px;text-transform:var(--caps)}
+.ns-log .hist-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:calc(6px * var(--dens));margin-bottom:10px}
+.ns-log .hist-cell{background:var(--s2);border-radius:var(--r1);padding:calc(8px * var(--dens)) calc(5px * var(--dens)) calc(7px * var(--dens));text-align:center}
+.ns-log .hist-cell-top{display:flex;align-items:center;justify-content:center;gap:calc(4px * var(--dens));margin-bottom:4px}
+.ns-log .hist-val{font:700 15px/1 var(--mono);color:var(--tx)}
+.ns-log .hist-key{font:400 7px/1 var(--mono);letter-spacing:.08em;text-transform:var(--caps);color:var(--mu)}
+.ns-log .hist-row{display:flex;gap:calc(5px * var(--dens));flex-wrap:wrap}
+.ns-log .hist-pill{font:400 9px/1 var(--mono);background:var(--s2);border-radius:var(--r1);padding:calc(4px * var(--dens)) calc(7px * var(--dens));color:var(--mu)}
+.ns-log .hist-pill.y{color:var(--y)}
+.ns-log .hist-empty{color:var(--mu);font-size:12px;text-align:center;padding:calc(40px * var(--dens)) 0}
+
+/* km trend chart ── */
+.ns-log .kmc{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);padding:calc(16px * var(--dens)) calc(15px * var(--dens)) calc(13px * var(--dens));margin-bottom:14px}
+.ns-log .kmc-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+.ns-log .kmc-title{font:700 11px/1 var(--head);letter-spacing:.1em;text-transform:var(--caps);color:var(--y)}
+.ns-log .kmc-sub{font:400 9px/1 var(--mono);color:var(--mu);letter-spacing:.04em}
+.ns-log .kmc-total{font:700 23px/1 var(--mono);color:var(--tx);margin-bottom:3px}
+.ns-log .kmc-total em{font:400 11px/1 var(--mono);color:var(--mu);font-style:normal;letter-spacing:.04em}
+.ns-log .kmc-goal{font:400 9px/1.5 var(--mono);color:var(--mu);letter-spacing:.05em;margin-bottom:18px}
+.ns-log .kmc-goal b{color:var(--gr);font-weight:400}
+.ns-log .kmc-chart{position:relative;height:120px;display:flex;align-items:flex-end;gap:calc(6px * var(--dens))}
+.ns-log .kmc-target{position:absolute;left:0;right:0;border-top:1px dashed var(--yb);pointer-events:none;z-index:1}
+.ns-log .kmc-target-lbl{position:absolute;right:0;top:-6px;transform:translateY(-50%);font:400 8px/1 var(--mono);
+                color:var(--y);background:var(--s1);padding:0 calc(4px * var(--dens));letter-spacing:.04em}
+.ns-log .kmc-col{flex:1;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:calc(3px * var(--dens))}
+.ns-log .kmc-val{font:400 8px/1 var(--mono);color:var(--mu)}
+.ns-log .kmc-bar{width:100%;max-width:28px;border-radius:var(--r1) var(--r1) 0 0;background:var(--yd);
+         border:var(--bw) solid var(--yb);min-height:2px}
+.ns-log .kmc-bar.hit{background:rgba(92,219,125,.18);border-color:rgba(92,219,125,.5)}
+.ns-log .kmc-days{display:flex;gap:calc(6px * var(--dens));margin-top:7px}
+.ns-log .kmc-day{flex:1;text-align:center;font:400 8px/1 var(--mono);letter-spacing:.06em;color:var(--mu);text-transform:var(--caps)}
+.ns-log .kmc-day.now{color:var(--y)}
+
+/* Trend indicators (Apple Fitness style) ── */
+.ns-log .ti{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;
+    justify-content:center;font:700 9px/1 var(--mono);flex-shrink:0}
+.ns-log .ti.pos{background:rgba(92,219,125,.15);border:var(--bw) solid rgba(92,219,125,.45);color:#5cdb7d}
+.ns-log .ti.neg{background:rgba(224,96,96,.15);border:var(--bw) solid rgba(224,96,96,.45);color:#e06060}
+.ns-log .ti.neu{background:rgba(60,60,60,.2);border:var(--bw) solid #333;color:#444}
+
+/* Reports ── */
+.ns-log .rep-btn{width:100%;background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+         color:var(--tx);font:400 13px/1 var(--mono);letter-spacing:.06em;
+         padding:calc(15px * var(--dens)) calc(14px * var(--dens));cursor:pointer;text-align:left;display:flex;
+         justify-content:space-between;align-items:center;margin-bottom:8px;transition:border-color .12s}
+.ns-log .rep-btn:active{border-color:var(--y)}
+.ns-log .rep-btn span{font:400 9px/1 var(--mono);color:var(--mu);letter-spacing:.08em}
+.ns-log .rep-pre{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);padding:calc(13px * var(--dens));
+         font:400 11px/1.75 var(--mono);color:#777;white-space:pre;overflow-x:auto;
+         touch-action:pan-x pan-y;
+         max-height:280px;overflow-y:auto;margin-bottom:10px;margin-top:14px}
+.ns-log .rep-actions{display:grid;grid-template-columns:1fr 1fr;gap:calc(8px * var(--dens));margin-bottom:20px}
+.ns-log .rep-act-btn{background:var(--s2);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+             color:var(--tx);font:400 10px/1 var(--mono);letter-spacing:.06em;
+             padding:calc(11px * var(--dens)) calc(8px * var(--dens));cursor:pointer;transition:all .12s;text-align:center}
+.ns-log .rep-act-btn:active{border-color:var(--y);background:var(--yd)}
+.ns-log .rep-act-btn.ok{color:var(--gr);border-color:var(--gr)}
+
+/* Data/settings ── */
+.ns-log .data-stat{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+           padding:calc(14px * var(--dens));margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.ns-log .data-stat-k{font:400 10px/1 var(--mono);letter-spacing:.08em;text-transform:var(--caps);color:var(--mu)}
+.ns-log .data-stat-v{font:700 13px/1 var(--mono);color:var(--tx)}
+.ns-log .data-warn{font:400 10px/1.6 var(--mono);color:var(--mu);margin-bottom:16px;padding:calc(12px * var(--dens)) calc(14px * var(--dens));
+           background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1)}
+
+/* Modal ── */
+.ns-log .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:110;
+               display:flex;align-items:center;justify-content:center;padding:calc(24px * var(--dens))}
+.ns-log .modal-box{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r2);
+           padding:calc(24px * var(--dens));width:100%;max-width:320px}
+.ns-log .modal-icon{font-size:28px;text-align:center;margin-bottom:14px}
+.ns-log .modal-title{font:700 16px/1 var(--head);letter-spacing:.06em;text-align:center;margin-bottom:10px;text-transform:var(--caps)}
+.ns-log .modal-body{font:400 12px/1.65 var(--mono);color:var(--mu);text-align:center;margin-bottom:14px}
+.ns-log .modal-count{font:700 11px/1 var(--mono);color:var(--re);text-align:center;margin-bottom:20px;letter-spacing:.06em}
+.ns-log .modal-cancel{width:100%;background:var(--s2);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+              color:var(--tx);font:400 12px/1 var(--mono);letter-spacing:.06em;padding:calc(13px * var(--dens));
+              cursor:pointer;margin-bottom:8px;transition:background .12s}
+.ns-log .modal-cancel:active{background:var(--bd)}
+.ns-log .modal-delete{width:100%;background:var(--re);border:none;border-radius:var(--r1);
+              color:#fff;font:700 12px/1 var(--head);letter-spacing:.1em;text-transform:var(--caps);
+              padding:calc(13px * var(--dens));cursor:pointer;transition:opacity .15s}
+.ns-log .modal-delete:active{opacity:.82}
+
+/* Icons ── */
+.ns-log .ico{width:13px;height:13px;display:inline-block;vertical-align:middle;margin-right:7px;margin-top:-2px;flex-shrink:0}

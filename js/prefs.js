@@ -1,0 +1,973 @@
+/* Prefs applies appearance to <html> before stylesheets load.
+   Enums use data attributes; continuous settings use inline custom properties
+   so user dials override presets. Storage: root_prefs_v1, with legacy root_theme
+   migration. Modules read behaviour settings live through Prefs.get(). */
+window.Prefs = (function () {
+'use strict';
+
+const KEY        = 'root_prefs_v1';
+const LEGACY_KEY = 'root_theme';
+const root       = document.documentElement;
+
+/* Themes
+   `mode` drives color-scheme and the address-bar colour. `swatch` is what the
+   picker draws: ground, surface, accent, text. `fonts` is the pairing the preset
+   asks for; the user's own font choice, if they make one, overrides it. */
+const THEMES = [
+  // dark ──
+  { id:'void',      name:'Void',      mode:'dark',  group:'dark',
+    desc:'the original — near-black, violet', sw:['#0e0e0e','#161616','#A78BFA','#dedede'] },
+  { id:'ember',     name:'Ember',     mode:'dark',  group:'dark',
+    desc:'warm charcoal, amber', sw:['#100d0b','#191512','#e8a33d','#e6ded3'] },
+  { id:'frost',     name:'Frost',     mode:'dark',  group:'dark',
+    desc:'cold slate, cyan', sw:['#0b0f13','#12181e','#5ad4e6','#d6e3ea'] },
+  { id:'moss',      name:'Moss',      mode:'dark',  group:'dark',
+    desc:'deep forest, chlorophyll green', sw:['#0a0f0c','#111813','#6ee7a0','#d5e5da'] },
+  { id:'bloom',     name:'Bloom',     mode:'dark',  group:'dark',
+    desc:'plum dusk, rose accent', sw:['#120c11','#1b131a','#f087a8','#ecdde6'] },
+  { id:'abyss',     name:'Abyss',     mode:'dark',  group:'dark',
+    desc:'midnight navy, electric blue', sw:['#070b14','#0d1320','#6f9bff','#ccd8f0'] },
+  { id:'terminal',  name:'Terminal',  mode:'dark',  group:'dark',
+    desc:'pure black, phosphor green, hard corners', sw:['#000000','#0a0a0a','#33ff88','#cfe8d8'] },
+  { id:'synth',     name:'Synth',     mode:'dark',  group:'dark',
+    desc:'neon magenta on indigo, glow on', sw:['#0d0819','#150e26','#ff4ecd','#e5dcf7'] },
+  { id:'dune',      name:'Dune',      mode:'dark',  group:'dark',
+    desc:'sand over basalt, soft and round', sw:['#14110d','#1d1913','#d9b070','#e9e0d0'] },
+  { id:'carbon',    name:'Carbon',    mode:'dark',  group:'dark',
+    desc:'brutalist grey, white accent, heavy rules', sw:['#121212','#1a1a1a','#ffffff','#e8e8e8'] },
+
+  // light ──
+  { id:'paper',     name:'Paper',     mode:'light', group:'light',
+    desc:'warm stock, serif display, real shadows', sw:['#f2ede3','#fffdf7','#6b4df0','#22201c'] },
+  { id:'linen',     name:'Linen',     mode:'light', group:'light',
+    desc:'off-white, olive ink, generous', sw:['#f6f4ef','#ffffff','#5c7a3f','#242420'] },
+  { id:'arctic',    name:'Arctic',    mode:'light', group:'light',
+    desc:'cool white, glacier blue, crisp', sw:['#f0f4f8','#ffffff','#0f6fd1','#12202c'] },
+  { id:'blueprint', name:'Blueprint', mode:'light', group:'light',
+    desc:'grid paper, ink lines, technical', sw:['#e8eef4','#f7fafc','#1b4f8f','#10222f'] },
+  { id:'noir',      name:'Noir',      mode:'light', group:'light',
+    desc:'paper white, black accent, no colour', sw:['#fafafa','#ffffff','#111111','#111111'] },
+];
+
+/* Accent swatches offered on top of whatever the preset picked. */
+const ACCENTS = [
+  { id:'preset', name:'theme',    hex:null },
+  { id:'violet', name:'violet',   hex:'#A78BFA' },
+  { id:'indigo', name:'indigo',   hex:'#7C8CFF' },
+  { id:'blue',   name:'blue',     hex:'#5e8cff' },
+  { id:'cyan',   name:'cyan',     hex:'#5ad4e6' },
+  { id:'teal',   name:'teal',     hex:'#3fc9b0' },
+  { id:'green',  name:'green',    hex:'#5cdb7d' },
+  { id:'lime',   name:'lime',     hex:'#b5d94a' },
+  { id:'amber',  name:'amber',    hex:'#e8a33d' },
+  { id:'orange', name:'orange',   hex:'#f0793a' },
+  { id:'red',    name:'red',      hex:'#e06060' },
+  { id:'rose',   name:'rose',     hex:'#f0709a' },
+  { id:'pink',   name:'pink',     hex:'#ff4ecd' },
+  { id:'mono',   name:'mono',     hex:'#d8d8d8' },
+];
+
+/* Font pairings. `google` is the family spec appended to one shared Google
+   Fonts request; a null means the stack is already on the device. */
+const DISPLAY_FONTS = [
+  { id:'syne',     name:'Syne',        stack:"'Syne',sans-serif",                          google:'Syne:wght@700;800' },
+  { id:'fraunces', name:'Fraunces',    stack:"'Fraunces',Georgia,serif",                   google:'Fraunces:opsz,wght@9..144,600;9..144,800' },
+  { id:'grotesk',  name:'Grotesk',     stack:"'Space Grotesk',system-ui,sans-serif",       google:'Space+Grotesk:wght@500;700' },
+  { id:'bebas',    name:'Bebas',       stack:"'Bebas Neue',Impact,sans-serif",             google:'Bebas+Neue' },
+  { id:'archivo',  name:'Archivo',     stack:"'Archivo',system-ui,sans-serif",             google:'Archivo:wght@600;800' },
+  { id:'unbounded',name:'Unbounded',   stack:"'Unbounded',system-ui,sans-serif",           google:'Unbounded:wght@600;800' },
+  /* 2.25 — six more. Chosen to widen the *range* rather than lengthen the list:
+     a condensed grotesque, a geometric, a slab, a high-contrast serif, a
+     rounded face and an editorial one, so the wordmark can be narrow, friendly
+     or literary rather than five shades of the same sans. Weights are the two
+     the app uses (700/800, or the nearest a face has) — a face is not worth
+     offering at a weight the titles cannot render. */
+  { id:'oswald',   name:'Oswald',      stack:"'Oswald',Impact,sans-serif",                 google:'Oswald:wght@600;700' },
+  { id:'poppins',  name:'Poppins',     stack:"'Poppins',system-ui,sans-serif",             google:'Poppins:wght@600;800' },
+  { id:'chivo',    name:'Chivo',       stack:"'Chivo',system-ui,sans-serif",               google:'Chivo:wght@700;900' },
+  { id:'playfair', name:'Playfair',    stack:"'Playfair Display',Georgia,serif",           google:'Playfair+Display:wght@700;900' },
+  { id:'nunito',   name:'Nunito',      stack:"'Nunito',system-ui,sans-serif",              google:'Nunito:wght@700;900' },
+  { id:'dmserif',  name:'DM Serif',    stack:"'DM Serif Display',Georgia,serif",           google:'DM+Serif+Display' },
+  { id:'system',   name:'System',      stack:"system-ui,-apple-system,'Segoe UI',sans-serif", google:null },
+  { id:'mono',     name:'Mono',        stack:"var(--mono)",                                google:null },
+];
+
+const MONO_FONTS = [
+  { id:'jetbrains', name:'JetBrains', stack:"'JetBrains Mono','Courier New',monospace",  google:'JetBrains+Mono:wght@400;700' },
+  { id:'plex',      name:'IBM Plex',  stack:"'IBM Plex Mono','JetBrains Mono',monospace", google:'IBM+Plex+Mono:wght@400;700' },
+  { id:'spacemono', name:'Space',     stack:"'Space Mono','JetBrains Mono',monospace",    google:'Space+Mono:wght@400;700' },
+  { id:'dm',        name:'DM Mono',   stack:"'DM Mono','JetBrains Mono',monospace",       google:'DM+Mono:wght@400;500' },
+  /* 2.25 — three more, again for range: a wide typewriter face, a narrow one
+     for dense screens, and a humanist that is easier to read at 9px than any
+     of the geometric ones above. */
+  { id:'courier',   name:'Courier',   stack:"'Courier Prime','Courier New',monospace",    google:'Courier+Prime:wght@400;700' },
+  { id:'redhat',    name:'Red Hat',   stack:"'Red Hat Mono','JetBrains Mono',monospace",  google:'Red+Hat+Mono:wght@400;700' },
+  { id:'sourcemono',name:'Source',    stack:"'Source Code Pro','JetBrains Mono',monospace", google:'Source+Code+Pro:wght@400;700' },
+  { id:'system',    name:'System',    stack:"ui-monospace,SFMono-Regular,Menlo,Consolas,monospace", google:null },
+];
+
+/* What each preset asks for when the user has not chosen a pairing themselves,
+   plus the shape/depth character that makes the preset a look rather than a
+   repaint. These are applied as data-attributes, so they still lose to an
+   explicit user dial. */
+const THEME_CHARACTER = {
+  void:      { display:'syne',      mono:'jetbrains', radius:4,  border:1, depth:'flat',  texture:'none' },
+  ember:     { display:'syne',      mono:'jetbrains', radius:5,  border:1, depth:'flat',  texture:'none' },
+  frost:     { display:'grotesk',   mono:'jetbrains', radius:6,  border:1, depth:'soft',  texture:'none' },
+  moss:      { display:'grotesk',   mono:'dm',        radius:8,  border:1, depth:'soft',  texture:'none' },
+  bloom:     { display:'unbounded', mono:'dm',        radius:14, border:1, depth:'soft',  texture:'none' },
+  abyss:     { display:'archivo',   mono:'plex',      radius:6,  border:1, depth:'lift',  texture:'none' },
+  terminal:  { display:'mono',      mono:'spacemono', radius:0,  border:1, depth:'flat',  texture:'scan' },
+  synth:     { display:'unbounded', mono:'spacemono', radius:2,  border:1, depth:'glow',  texture:'grid' },
+  dune:      { display:'fraunces',  mono:'plex',      radius:16, border:1, depth:'soft',  texture:'grain' },
+  carbon:    { display:'archivo',   mono:'jetbrains', radius:0,  border:2, depth:'flat',  texture:'none' },
+  paper:     { display:'fraunces',  mono:'plex',      radius:12, border:1, depth:'lift',  texture:'grain' },
+  linen:     { display:'fraunces',  mono:'dm',        radius:10, border:1, depth:'soft',  texture:'none' },
+  arctic:    { display:'grotesk',   mono:'plex',      radius:8,  border:1, depth:'soft',  texture:'none' },
+  blueprint: { display:'archivo',   mono:'spacemono', radius:2,  border:1, depth:'flat',  texture:'grid' },
+  noir:      { display:'archivo',   mono:'jetbrains', radius:0,  border:1, depth:'flat',  texture:'none' },
+};
+
+/* Apps
+   Every app the shell can host, in the order they ship. `apps` below is the
+   user's own subset and order; the shell builds its slide track and tab bar
+   from it, so an app switched off here has no tab and no slide. Settings is
+   always last and is not in this list. */
+const APPS = ['do', 'log', 'plan', 'store', 'tend', 'track', 'learn', 'cal', 'create', 'tools'];
+/* Every tab in the bar, which is the apps plus settings — settings has no data
+   of its own but it has a tab, and a tab has a colour. Its custom property is
+   --tab-set, not --tab-settings: the button's data-app is the long name and the
+   token is the short one, so the two are mapped here rather than remembered at
+   each call site. */
+const TAB_IDS = APPS.concat('settings');
+const tabVar  = a => '--tab-' + (a === 'settings' ? 'set' : a);
+/* The instruments inside TOOLS. Not apps — they share one slide and one tab —
+   but the strip that carries them is switched on and ordered the same way the
+   tab bar is, so the ids live beside the app ids that taught them the shape. */
+const TOOL_IDS = ['pom', 'whf', 'opt', 'dat'];
+
+/* Schema
+   Every setting in one table: its default, its kind, and its bounds. The
+   settings UI is generated from this, so adding a knob is one line here plus
+   whatever CSS reads it. `auto` means "take it from the theme's character". */
+const SCHEMA = {
+  // appearance — enumerated
+  theme:        { kind:'enum',   def:'void',   values:() => THEMES.map(t => t.id), attr:'data-theme' },
+  themeMode:    { kind:'enum',   def:'fixed',  values:['fixed','system'] },
+  themeDark:    { kind:'enum',   def:'void',   values:() => THEMES.filter(t => t.mode === 'dark').map(t => t.id) },
+  themeLight:   { kind:'enum',   def:'paper',  values:() => THEMES.filter(t => t.mode === 'light').map(t => t.id) },
+  /* 'custom' is a valid accent alongside the named swatches — it reads its hex
+     from accentCustom rather than from the ACCENTS table. */
+  accent:       { kind:'enum',   def:'preset', values:() => ACCENTS.map(a => a.id).concat('custom') },
+  accentCustom: { kind:'color',  def:'#A78BFA' },
+  displayFont:  { kind:'enum',   def:'auto',   values:() => ['auto', ...DISPLAY_FONTS.map(f => f.id)] },
+  monoFont:     { kind:'enum',   def:'auto',   values:() => ['auto', ...MONO_FONTS.map(f => f.id)] },
+  depth:        { kind:'enum',   def:'auto',   values:['auto','flat','soft','lift','heavy','glow'], attr:'data-depth' },
+  texture:      { kind:'enum',   def:'auto',   values:['auto','none','grain','scan','grid','dots'], attr:'data-texture' },
+  motion:       { kind:'enum',   def:'full',   values:['full','reduced','none'],       attr:'data-motion' },
+  /* The bar's own motion, kept when everything else is switched off. Only does
+     anything at Motion: none — see tokens.css. */
+  navMotion:    { kind:'bool',   def:false, attr:'data-nav-motion' },
+  contrast:     { kind:'enum',   def:'normal', values:['normal','more','max'],         attr:'data-contrast' },
+  caps:         { kind:'enum',   def:'on',     values:['on','off'],                    attr:'data-caps' },
+  navStyle:     { kind:'enum',   def:'pill',   values:['pill','bar','minimal'],        attr:'data-nav' },
+  /* The three things the tab bar's active indicator can be asked about, kept
+     apart because they are three questions and not one: what shape the mark
+     around the tab is, how it arrives, and — once `colorfulTabs` is on — which
+     set of hues the tabs wear. `colorfulTabs` stays the gate it always was, so
+     an install that had colour-coded tabs before still has them, in the palette
+     it already had (`app`). */
+  navShape:     { kind:'enum',   def:'pill',   values:['pill','round','square','circle','ring','under'],
+                                                                                attr:'data-nav-shape' },
+  navAnim:      { kind:'enum',   def:'grow',   values:['grow','pop','fade','rise','none'], attr:'data-nav-anim' },
+  tabPalette:   { kind:'enum',   def:'app',    values:['app','warm','cool','candy','neon','mono','custom'],
+                                                                                attr:'data-tab-palette' },
+  /* The custom palette: one hex per tab, and only the tabs that have actually
+     been picked. `custom` matches no palette block in themes.css on purpose —
+     a tab this record does not name keeps the shipped hue, so a new app arrives
+     coloured rather than blank and picking one tab does not mean picking ten. */
+  tabColors:    { kind:'colors', def:{} },
+  /* The tab's colour, worn by the whole app rather than only by its button.
+     Independent of `colorfulTabs`, which is about the *bar*: with the bar left
+     alone this is still what gives DO a purple accent and STORE an amber one,
+     and the active pill follows because it falls back to --y. */
+  tabAccent:    { kind:'bool',   def:true,  attr:'data-tab-accent' },
+  cardStyle:    { kind:'enum',   def:'outline',values:['outline','fill','ghost','line'],attr:'data-cards' },
+  accentUse:    { kind:'enum',   def:'normal', values:['subtle','normal','loud'],      attr:'data-accent-use' },
+  titleSize:    { kind:'enum',   def:'m',      values:['xs','s','m','l','xl'],         attr:'data-title' },
+  /* The sticky sub-screen header's title, on its own steps. Deliberately not
+     the same dial as the wordmark: the wordmark is glanced at on the way past,
+     this one is read at arm's length for as long as you are on that screen,
+     and wanting one big and the other small is a real thing to want. Its box
+     is derived from it, so a larger title gets a taller header (tokens.css). */
+  hdTitleSize:  { kind:'enum',   def:'m',      values:['xs','s','m','l','xl'],         attr:'data-hd-title' },
+  /* What the band's wordmark is made of. The icon is the app's own tab glyph,
+     put in front of its name by the shell; this says whether each half is
+     drawn. `icon` alone is the one worth having and the one worth being
+     careful about — an app with no name on it is only readable because the
+     glyph is the one already in the tab bar. */
+  bandMark:     { kind:'enum',   def:'name',   values:['name','both','icon'],          attr:'data-band-mark' },
+
+  // appearance — continuous, written as inline custom properties
+  /* How fast the motion runs, on top of whichever preset is picked. Stored as
+     a *speed* because that is what it is called and what the readout says;
+     --mo is a duration multiplier, so apply() writes 1/speed. */
+  motionSpeed:  { kind:'range',  def:1,    min:0.5, max:3,   step:0.1 },
+  radius:       { kind:'range',  def:null, min:0,   max:24,  step:1,    unit:'px',  cssVar:'--r-base' },
+  border:       { kind:'range',  def:null, min:0,   max:3,   step:0.5,  unit:'px',  cssVar:'--bw' },
+  density:      { kind:'range',  def:1,    min:0.78,max:1.35,step:0.02,             cssVar:'--dens' },
+  iconStroke:   { kind:'range',  def:2,    min:1,   max:3,   step:0.1,              cssVar:'--icon-stroke' },
+  chromeAlpha:  { kind:'range',  def:0.82, min:0.35,max:1,   step:0.01,             cssVar:'--chrome-alpha' },
+  contentWidth: { kind:'range',  def:780,  min:560, max:1400,step:20,  unit:'px',   cssVar:'--readable' },
+  /* What a window wider than the phone does with the extra room. `rail` is the
+     2.8 behaviour — the pill unrolls into a side rail and the content spreads
+     to `contentWidth`. `frame` pins the app to a phone-shaped box in the middle
+     of the screen and leaves every phone rule exactly as it is, pill included,
+     which is the layout the app was actually designed against. The frame is
+     also what makes the *whole* of the floating chrome land inside the box —
+     see the note in shell.css, and §6. */
+  desktopMode:  { kind:'enum',   def:'frame', values:['frame','rail'],  attr:'data-desktop' },
+  frameW:       { kind:'range',  def:420,  min:320, max:2000,step:10,  unit:'px',   cssVar:'--frame-w' },
+  frameH:       { kind:'range',  def:880,  min:400, max:1600,step:10,  unit:'px',   cssVar:'--frame-h' },
+  /* A few pixels of air under the status bar, folded into `--sat` so it moves
+     every header in the app at once — see tokens.css for why it is a dial and
+     not a fix. */
+  bandDrop:     { kind:'range',  def:6,    min:0,   max:24,  step:1,   unit:'px',   cssVar:'--band-drop' },
+  /* The bottom pill's three: how tall, how round and how big its icons are.
+     The defaults are the literals they replaced, so nothing moves until one is
+     touched. The floor on the height is 44px — the arrows are centred against
+     it and a shorter bar would push them off the bottom of their own row. */
+  navHeight:    { kind:'range',  def:58,   min:44,  max:76,  step:1,   unit:'px',   cssVar:'--nav-fh' },
+  navRadius:    { kind:'range',  def:29,   min:0,   max:34,  step:1,   unit:'px',   cssVar:'--nav-r' },
+  navIcon:      { kind:'range',  def:19,   min:14,  max:26,  step:1,   unit:'px',   cssVar:'--nav-icon' },
+  textureAmount:{ kind:'range',  def:1,    min:0,   max:2,   step:0.1,              cssVar:'--tex-mult' },
+
+  // appearance — flags
+  showTabLabels:{ kind:'bool',   def:true,  attr:'data-tab-labels' },
+  accentGlow:   { kind:'bool',   def:false, attr:'data-glow' },
+  monoNumbers:  { kind:'bool',   def:true,  attr:'data-tnum' },
+  colorfulTabs: { kind:'bool',   def:false, attr:'data-color-tabs' },
+  chromeBlur:   { kind:'bool',   def:true,  attr:'data-chrome-blur' },
+  /* The explanatory text under a control — the paragraph over a settings
+     section and the grey line under a switch. On once, while the app is
+     new; off once you know what everything does, and the panels halve in
+     length. One attribute, so it reaches every hint at once and any future
+     one for free. */
+  tips:         { kind:'bool',   def:true,  attr:'data-tips' },
+
+  // navigation — which apps have a tab, and in what order
+  apps:         { kind:'list',   def:APPS.slice() },
+  /* Every app this install has ever been offered. Not a setting — there is no
+     control for it — but it lives here so it is stored, exported and restored
+     with the rest. See the note on load(): it is what tells a brand-new app
+     apart from one the user switched off. */
+  appsSeen:     { kind:'list',   def:APPS.slice() },
+  /* Not a setting and there is no control for it — it records that the 2.26.0
+     Spacing fold has been undone, so the repair runs once. Stored, exported and
+     restored with the rest, like `appsSeen`. */
+  densRepair:   { kind:'bool',   def:false },
+
+  // behaviour
+  startTab:     { kind:'enum',   def:'last', values:['last', ...APPS, 'settings'] },
+  swipe:        { kind:'bool',   def:true },
+  swipeStrength:{ kind:'range',  def:0.22, min:0.1, max:0.5, step:0.01 },
+  autoHideChrome:{kind:'bool',   def:true },
+  haptics:      { kind:'bool',   def:false },
+  /* Sound is the one setting that can embarrass someone in a quiet room, so it
+     is off until it is asked for — the same reason haptics is. */
+  sounds:       { kind:'bool',   def:false },
+  soundLevel:   { kind:'range',  def:0.3,  min:0.05, max:1, step:0.05 },
+  /* The kit sets the character of all five moments at once; the five dials
+     under it each override one. `auto` is "whatever the kit says" and is the
+     default for every one of them, so the map only exists for someone who
+     goes looking for it. `classic` is what 4.2 sounded like — see the note
+     over VOICES. */
+  soundKit:     { kind:'enum',   def:'tick', values:() => SOUND_KIT_IDS },
+  sndTap:       { kind:'enum',   def:'auto', values:() => ['auto', ...VOICE_IDS] },
+  sndNav:       { kind:'enum',   def:'auto', values:() => ['auto', ...VOICE_IDS] },
+  sndMenu:      { kind:'enum',   def:'auto', values:() => ['auto', ...VOICE_IDS] },
+  sndDone:      { kind:'enum',   def:'auto', values:() => ['auto', ...VOICE_IDS] },
+  sndMsg:       { kind:'enum',   def:'auto', values:() => ['auto', ...VOICE_IDS] },
+  confirmDestructive:{ kind:'bool', def:true },
+  /* The in-app numpad on fields that only take a number. `auto` means "where
+     the keyboard is a virtual one" — a laptop's number field is fine as it is,
+     and a pad sheet over every settings dial there would be in the way. */
+  numpad:       { kind:'enum',   def:'auto', values:['auto','always','off'] },
+  toastMs:      { kind:'range',  def:1800, min:800, max:5000, step:100 },
+  /* How long the shared undo pill stays after something is cleared. It is a
+     *seconds* dial rather than a milliseconds one because it is a window you
+     wait inside, not a message you read past — the toast's number is the one
+     you never think about and this is the one you might. 0 pins it: it stays
+     until it is tapped or the next clear replaces it. */
+  undoSec:      { kind:'range',  def:5,    min:0,   max:30,   step:1, unit:'s' },
+  /* What the undo pill is made of. Two dials rather than one because the label
+     and the glyph answer different questions: the label says what is being put
+     back, the glyph says the pill is an undo at all. `none` on the glyph forces
+     the label back on — see tokens.css. */
+  undoIcon:     { kind:'enum',   def:'undo',
+                  values:['undo','undo-round','back','chev-l','none'], attr:'data-undo-icon' },
+  undoText:     { kind:'bool',   def:true, attr:'data-undo-text' },
+  /* How far either side of today a sync reaches. Both routes read it, so the
+     two windows cannot drift apart. */
+  syncDays:     { kind:'range',  def:10,   min:1,   max:60,  step:1, unit:' days either side' },
+  /* Let the Todoist push carry **today's** LOG day as well. Off by default and
+     deliberately today-only: the private route exists because a journal does
+     not belong on someone else's server, and the one honest exception is the
+     day you are still in the middle of. See ROOT.md §10. */
+  syncTodayPrivate: { kind:'bool', def:false },
+  /* How often a sync runs on its own, in minutes. `0` is off, and off is the
+     default: §10's "both are manual" was a rule about not being stood next to
+     an import that goes wrong, and the answer to that is the merge settling
+     overlaps by recency rather than a switch nobody chose. The steps are the
+     ones asked for — a minute up to an hour — and nothing between them, because
+     a sync interval is a decision, not a slider you land on 37 with. */
+  syncEvery:    { kind:'enum',   def:'0',
+                  values:['0','1','2','3','4','5','10','15','30','60'] },
+  /* What a sync is allowed to carry. Four groups, because "everything" and
+     "one app" are both wrong answers: `apps` is what every app wrote, `settings`
+     is the content layer, `style` is the whole appearance engine, and `system`
+     is the shell's own bookkeeping — the tab you were on, the label cache, the
+     sync stamps. `system` is the one that is off: it is the only group where the
+     other device's answer is not better than this one's. */
+  syncApps:     { kind:'bool',   def:true },
+  syncSettings: { kind:'bool',   def:true },
+  syncStyle:    { kind:'bool',   def:true },
+  syncSystem:   { kind:'bool',   def:false },
+  /* Keep the private records off the route that leaves this device. On, which
+     is the split ROOT has always had between the two routes (§10) — turning it
+     off is saying "carry the journal over Todoist too", which is a thing to
+     decide rather than a thing to default. Tokens are not part of this deal:
+     they travel on no route either way. */
+  syncSafe:     { kind:'bool',   def:true },
+  keyboardNav:  { kind:'bool',   def:true },
+  /* The five bindings that are letters rather than arrows, each one rebindable.
+     The arrows, 1–9 and "/" are built in and are *not* in here: they are the
+     bindings that read the same on every keyboard, so there is nothing to
+     choose. These five are the ones whose defaults are a guess about a layout
+     — a, e, comma and o sit under the fingers on some and nowhere near them on
+     others — which is exactly why they are a dial. A key held here is stored
+     folded (lower case, `e.key`), and an empty string means "no key".
+
+     `in` and `out` are the two levels: the cursor walks a screen's blocks, `in`
+     steps inside one and `out` comes back. Escape does `out` too and is built
+     in, so the way back is never a key you have to have bound. */
+  keyMap:       { kind:'keys',
+                  def:{ prev:'a', next:'e', up:',', down:'o', left:'c', right:'t',
+                        act:' ', in:'u', out:'y' } },
+  /* What "you are on this" looks like. Four genuinely different answers rather
+     than four strengths of one, because 4.5's hard ring was too loud and 4.9's
+     hairline wash was too quiet — which suggests the right answer is not a
+     volume knob but a choice of kind. */
+  kbMark:       { kind:'enum',   def:'glow', values:['glow','arrow','bar','spotlight'],
+                                              attr:'data-kb-mark' },
+  lockPortrait: { kind:'bool',   def:true,  attr:'data-portrait' },
+
+  // formatting
+  dateFormat:   { kind:'enum',   def:'long', values:['long','short','iso'] },
+  weekStart:    { kind:'enum',   def:'mon',  values:['mon','sun'] },
+  currency:     { kind:'text',   def:'€' },
+
+  /* CAL. `calHour` is the one place a pixel is a setting rather than a token:
+     it is how tall an hour is drawn, which is a dial, not a shape. */
+  calHour:      { kind:'range',  def:56,  min:28, max:120, step:4, unit:'px / hour' },
+  calShowFixed: { kind:'bool',   def:true },
+  calShowIdle:  { kind:'bool',   def:true },
+  calCalNames:  { kind:'bool',   def:false },
+  calAhead:     { kind:'range',  def:7,   min:1,  max:21,  step:1, unit:' days' },
+  calKeep:      { kind:'range',  def:60,  min:7,  max:365, step:1, unit:' days' },
+  /* The stepper is a wide bar across the bottom now, so it covers more of the
+     day than the pill did: it steps aside on its own once you stop using it.
+     0 pins it. */
+  calStepsHide: { kind:'range',  def:5,   min:0,  max:30,  step:1, unit:'s idle' },
+  /* Colour on the rows themselves, not only on the 3px rail. Two dials rather
+     than one because the two kinds of row answer different questions: a block
+     is work you chose and put somewhere, a template row is the shape of the
+     day. Washing both at once is a rainbow; washing one is a highlight. */
+  calColorBlocks:{ kind:'bool',  def:false },
+  calColorOther: { kind:'bool',  def:false },
+  /* LOG's morning wake-up time moves the day. Off keeps the day exactly as
+     PLAN exported it. See CAL.setWake(). */
+  calWakeShift: { kind:'bool',   def:true },
+  /* DAY's edit mode. The step the + and − on a row move its length by; a
+     quarter of an hour by default, because that is the grain PLAN's own
+     durations come in. It is a *setting* rather than a dial on the row: a
+     schedule whose increment changes row to row is one you cannot read. */
+  calStep:      { kind:'range',  def:15,  min:5,  max:60,  step:5, unit:' min' },
+
+  /* DO's routine cards. `doHideDone` drops a finished routine off the grid
+     rather than greying it; `doCardStyle` is how much of a card is drawn. */
+  /* What TOOLS draws its readout as. Four genuinely different approaches
+     rather than four skins of one: a ring, a bar, a column of blocks, and no
+     container at all. The instrument underneath is identical — every one of
+     them is fed the same 0-to-1 fraction — so this is a look, not a mode. */
+  toolsLayout:  { kind:'enum',   def:'ring', values:['ring','bar','stack','plain'],
+                                              attr:'data-tools-layout' },
+  /* Which instruments the strip carries, and in what order. Same shape as
+     `apps`: the list *is* the visibility, so a tool missing from it is one
+     switched off rather than one this build does not have. Never empty — a
+     strip with nothing on it is a screen with nothing to do. */
+  toolsShown:   { kind:'list',   def:TOOL_IDS.slice(), members:TOOL_IDS },
+  /* The one big button. Square since 4.12, and its corner is a *percentage*
+     of its own box rather than a pixel radius — so 50 is a circle at any size
+     and the two dials never have to be set in step with each other. */
+  toolsBtnSize: { kind:'range',  def:74, min:52, max:120, step:2, unit:'px', cssVar:'--tl-btn-size' },
+  toolsBtnRound:{ kind:'range',  def:16, min:0,  max:50,  step:1, unit:'%',  cssVar:'--tl-btn-round' },
+  doHideDone:   { kind:'bool',   def:false },
+  doCardStyle:  { kind:'enum',   def:'full', values:['full','minimal'] },
+};
+
+/* State */
+let prefs = {};
+const subs = [];
+/* Which tab is on screen. Not a setting — the shell sets it on every move and
+   it is never stored — but the accent reads it, so it lives beside the prefs
+   the accent is otherwise made of. */
+let curApp = null;
+
+function defaultsOf() {
+  const o = {};
+  // arrays and records are copied so a list or colour pref never aliases the
+  // schema's own default
+  Object.keys(SCHEMA).forEach(k => {
+    const d = SCHEMA[k].def;
+    o[k] = Array.isArray(d) ? d.slice() : (d && typeof d === 'object' ? { ...d } : d);
+  });
+  return o;
+}
+
+/* The apps an install was offered before `appsSeen` existed. A one-time
+   migration constant, not a list to keep up to date: every install that boots
+   from here on stores its own `appsSeen`, so this is read once per install and
+   then never again. */
+const APPS_BEFORE_SEEN = ['do', 'log', 'plan', 'store', 'tend', 'track', 'learn'];
+
+/* A new app has to arrive on an install that already has an app list
+   `apps` is stored whole and replaces the default whole — the same rule Config
+   uses for a branch — so an app added in a later version has no tab on any
+   install that has ever opened the layout panel, which is every install that
+   has been used. CAL would have shipped invisible, and an invisible tab is the
+   one bug a new tab can actually have.
+
+   `appsSeen` is what tells the two cases apart. An app in APPS this install has
+   never been offered is *new*: it goes in, in its shipped position. An app
+   missing from `apps` but present in `appsSeen` was switched off deliberately
+   and stays off. The result is persisted immediately — without that, switching
+   the new app straight back off would be undone on the next boot. */
+function adoptNewApps(stored) {
+  if (!Array.isArray(prefs.apps) || !prefs.apps.length) prefs.apps = APPS.slice();
+  const seen  = Array.isArray(stored.appsSeen) ? stored.appsSeen : APPS_BEFORE_SEEN;
+  const fresh = APPS.filter(a => !seen.includes(a));
+  prefs.appsSeen = APPS.slice();
+  if (!fresh.length) return fresh;
+  // rebuilt from APPS so a new app lands where it ships, not on the end
+  prefs.apps = APPS.filter(a => prefs.apps.includes(a) || fresh.includes(a));
+  persist();
+  return fresh;
+}
+
+function load() {
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch {}
+  prefs = Object.assign(defaultsOf(), stored);
+  // first run on an install that only ever knew the old four themes
+  if (!stored.theme) {
+    try {
+      const legacy = localStorage.getItem(LEGACY_KEY);
+      if (legacy && THEMES.some(t => t.id === legacy)) prefs.theme = legacy;
+    } catch {}
+  }
+  adoptNewApps(stored);
+  dropUiScale(stored);
+}
+
+/* Drop retired document scale. Repair the old scale-to-density migration by
+   resetting density once; the migration marker preserves later user choices. */
+function dropUiScale(stored) {
+  delete prefs.uiScale;
+  if (stored.uiScale === undefined && prefs.densRepair) return;
+  /* 2.26.0 is the only build that wrote a folded density, and it always wrote
+     `uiScale` away in the same pass — so a stored density with no stored
+     uiScale beside it, on an install that has not been repaired yet, is either
+     that fold or a deliberate choice. Both go back to the default: a soft app
+     is not worth preserving either of them. */
+  if (!prefs.densRepair) {
+    prefs.density = SCHEMA.density.def;
+    prefs.densRepair = true;
+    persist();
+  }
+}
+
+function persist() {
+  try { localStorage.setItem(KEY, JSON.stringify(prefs)); } catch {}
+  // keep the pre-2.0 key in step; the standalone apps still read it
+  try { localStorage.setItem(LEGACY_KEY, activeTheme()); } catch {}
+}
+
+function get(k)  { return prefs[k]; }
+function all()   { return Object.assign({}, prefs); }
+
+function set(k, v) {
+  if (!(k in SCHEMA)) return;
+  prefs[k] = coerce(k, v);
+  persist();
+  apply();
+  notify(k);
+}
+function setMany(obj) {
+  Object.keys(obj).forEach(k => { if (k in SCHEMA) prefs[k] = coerce(k, obj[k]); });
+  persist(); apply(); notify('*');
+}
+
+function coerce(k, v) {
+  const s = SCHEMA[k];
+  if (!s) return v;
+  if (s.kind === 'bool')  return !!v;
+  if (s.kind === 'range') {
+    if (v === null || v === '' || v === undefined) return s.def;
+    const n = parseFloat(v);
+    if (!isFinite(n)) return s.def;
+    return Math.min(s.max, Math.max(s.min, n));
+  }
+  if (s.kind === 'enum') {
+    const vals = typeof s.values === 'function' ? s.values() : s.values;
+    return vals.includes(v) ? v : s.def;
+  }
+  /* the app list: known ids only, no duplicates, never empty — a pasted look
+     that names an app this build does not have simply loses that entry */
+  if (s.kind === 'list') {
+    if (!Array.isArray(v)) return s.def.slice();
+    /* `members` names the pool where it is not the app list — TOOLS' strip is
+       the same shape (the list *is* the visibility) over a different set. */
+    const pool = s.members || APPS;
+    const out = v.filter((x, i, a) => pool.includes(x) && a.indexOf(x) === i);
+    return out.length ? out : s.def.slice();
+  }
+  /* the custom tab palette: known tabs only, one well-formed hex each — a
+     pasted look naming an app this build does not have loses that entry, the
+     same rule the app list follows */
+  if (s.kind === 'colors') {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+    const out = {};
+    TAB_IDS.forEach(a => { if (v[a]) out[a] = normHex(v[a]); });
+    return out;
+  }
+  /* the rebindable keys: the five known actions only, one folded key each. A
+     missing action falls back to the shipped default, so a pasted look written
+     before an action existed still binds it; an explicit empty string is kept,
+     because "no key" is a thing to choose. */
+  if (s.kind === 'keys') {
+    const out = Object.assign({}, s.def);
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      Object.keys(s.def).forEach(a => {
+        if (typeof v[a] !== 'string') return;
+        out[a] = v[a] === '' ? '' : v[a].toLowerCase().slice(0, 20);
+      });
+    }
+    return out;
+  }
+  // a pasted "look" can carry anything; keep text and colour well-formed
+  if (s.kind === 'text')  return String(v ?? '').slice(0, 8) || s.def;
+  if (s.kind === 'color') return normHex(v);
+  return v;
+}
+
+function reset(k) {
+  if (k in SCHEMA) { prefs[k] = defaultsOf()[k]; persist(); apply(); notify(k); }
+}
+function resetAll() { prefs = defaultsOf(); persist(); apply(); notify('*'); }
+
+/* The shell, on every tab change. Only re-applies when the tab actually
+   changed: go() lands on the tab already shown often enough. */
+function setApp(name) {
+  if (name === curApp) return;
+  curApp = name;
+  if (prefs.tabAccent) apply();
+}
+
+function subscribe(fn) { if (typeof fn === 'function') subs.push(fn); }
+function notify(k) { subs.forEach(fn => { try { fn(k); } catch (e) { console.error(e); } }); }
+
+/* Derived */
+const prefersDark = () => {
+  try { return !window.matchMedia || window.matchMedia('(prefers-color-scheme: dark)').matches; }
+  catch { return true; }
+};
+
+/* Which preset is actually on screen right now. In `system` mode the two chosen
+   presets take turns; in `fixed` mode it is simply `theme`. */
+function activeTheme() {
+  if (prefs.themeMode === 'system') return prefersDark() ? prefs.themeDark : prefs.themeLight;
+  return prefs.theme;
+}
+function themeInfo(id) { return THEMES.find(t => t.id === (id || activeTheme())) || THEMES[0]; }
+function character(id) { return THEME_CHARACTER[id || activeTheme()] || THEME_CHARACTER.void; }
+
+/* The accent when it is the tab's colour rather than the theme's.
+   `--tab-<app>` is resolved by the stylesheet — six palettes' worth of hues,
+   one of them a color-mix off the text colour — so it is read back off the
+   element instead of being worked out a second time here. A hex gets its ink
+   from its own luminance; anything else borrows the palette's own --tab-on-c.
+   Null means "nothing to read": at boot, before the shell has said which tab
+   is up, and on a build whose stylesheet has not loaded. */
+function tabAccent() {
+  if (!prefs.tabAccent || !curApp) return null;
+  const cs = getComputedStyle(root);
+  const c  = cs.getPropertyValue(tabVar(curApp)).trim();
+  if (!c) return null;
+  const hex = /^#[0-9a-f]{3,8}$/i.test(c);
+  return { c, ink: hex ? (luminance(c) > 0.45 ? '#0b0b0b' : '#ffffff')
+                       : (cs.getPropertyValue('--tab-on-c').trim() || '#ffffff') };
+}
+
+function accentHex() {
+  if (prefs.accent === 'preset') return null;               // let the theme's own accent stand
+  if (prefs.accent === 'custom') return normHex(prefs.accentCustom);
+  const a = ACCENTS.find(x => x.id === prefs.accent);
+  return a && a.hex ? a.hex : null;
+}
+
+/* Colour helpers */
+function normHex(h) {
+  if (typeof h !== 'string') return '#A78BFA';
+  let s = h.trim().replace(/^#/, '');
+  if (/^[0-9a-f]{3}$/i.test(s)) s = s.split('').map(c => c + c).join('');
+  return /^[0-9a-f]{6}$/i.test(s) ? '#' + s.toLowerCase() : '#A78BFA';
+}
+function rgbOf(hex) {
+  const s = normHex(hex).slice(1);
+  return [parseInt(s.slice(0,2),16), parseInt(s.slice(2,4),16), parseInt(s.slice(4,6),16)];
+}
+/* WCAG relative luminance — used only to decide whether text drawn ON the accent
+   should be the theme's ground or its foreground. */
+function luminance(hex) {
+  const [r,g,b] = rgbOf(hex).map(v => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126*r + 0.7152*g + 0.0722*b;
+}
+const rgba = (hex, a) => { const [r,g,b] = rgbOf(hex); return `rgba(${r},${g},${b},${a})`; };
+
+/* Font loading
+   One <link> for every face the current look needs, rebuilt whenever the pairing
+   changes. Families already requested are not re-requested: the href is compared
+   before the element is touched, so switching between two themes that share a
+   face costs nothing. */
+function resolvedDisplay() {
+  const id = prefs.displayFont === 'auto' ? character().display : prefs.displayFont;
+  return DISPLAY_FONTS.find(f => f.id === id) || DISPLAY_FONTS[0];
+}
+function resolvedMono() {
+  const id = prefs.monoFont === 'auto' ? character().mono : prefs.monoFont;
+  return MONO_FONTS.find(f => f.id === id) || MONO_FONTS[0];
+}
+
+let fontLink = null;
+function loadFonts() {
+  const fams = [resolvedDisplay().google, resolvedMono().google].filter(Boolean);
+  // both faces on the device: drop the link outright. Setting href to '' does
+  // not blank it — it resolves to the page itself, which is then fetched as a
+  // stylesheet.
+  if (!fams.length) { if (fontLink) { fontLink.remove(); fontLink = null; } return; }
+  const href = 'https://fonts.googleapis.com/css2?' +
+               fams.map(f => 'family=' + f).join('&') + '&display=swap';
+  if (!fontLink) {
+    fontLink = document.getElementById('root-fonts');
+    if (!fontLink) {
+      fontLink = document.createElement('link');
+      fontLink.id = 'root-fonts';
+      fontLink.rel = 'stylesheet';
+      document.head.appendChild(fontLink);
+    }
+  }
+  if (fontLink.href !== href) fontLink.href = href;
+}
+
+/* Apply
+   The single place that writes to the DOM. Called on boot, on every set(), and
+   when the OS colour scheme flips while `themeMode` is `system`. */
+function apply() {
+  const id   = activeTheme();
+  const info = themeInfo(id);
+  const ch   = character(id);
+  const st   = root.style;
+
+  // enumerated → attributes
+  root.setAttribute('data-theme', id);
+  root.setAttribute('data-mode',  info.mode);
+  root.setAttribute('data-depth',   prefs.depth   === 'auto' ? ch.depth   : prefs.depth);
+  root.setAttribute('data-texture', prefs.texture === 'auto' ? ch.texture : prefs.texture);
+  root.setAttribute('data-motion',  prefs.motion);
+  root.setAttribute('data-contrast',prefs.contrast);
+  root.setAttribute('data-caps',    prefs.caps);
+  root.setAttribute('data-nav',     prefs.navStyle);
+  root.setAttribute('data-nav-shape',   prefs.navShape);
+  root.setAttribute('data-nav-anim',    prefs.navAnim);
+  root.setAttribute('data-tab-palette', prefs.tabPalette);
+  root.setAttribute('data-cards',   prefs.cardStyle);
+  root.setAttribute('data-accent-use', prefs.accentUse);
+  root.setAttribute('data-title',      prefs.titleSize);
+  root.setAttribute('data-hd-title',   prefs.hdTitleSize);
+  root.setAttribute('data-band-mark',  prefs.bandMark);
+  root.setAttribute('data-tab-labels', prefs.showTabLabels ? 'on' : 'off');
+  root.setAttribute('data-glow',       prefs.accentGlow    ? 'on' : 'off');
+  root.setAttribute('data-tnum',       prefs.monoNumbers   ? 'on' : 'off');
+  root.setAttribute('data-color-tabs', prefs.colorfulTabs  ? 'on' : 'off');
+  root.setAttribute('data-tab-accent', prefs.tabAccent     ? 'on' : 'off');
+  root.setAttribute('data-chrome-blur', prefs.chromeBlur   ? 'on' : 'off');
+  root.setAttribute('data-tips',        prefs.tips         ? 'on' : 'off');
+  root.setAttribute('data-nav-motion',  prefs.navMotion    ? 'on' : 'off');
+  root.setAttribute('data-portrait', prefs.lockPortrait ? 'lock' : 'free');
+  root.setAttribute('data-desktop',  prefs.desktopMode);
+  root.setAttribute('data-undo-icon', prefs.undoIcon);
+  root.setAttribute('data-tools-layout', prefs.toolsLayout);
+  root.setAttribute('data-kb-mark',       prefs.kbMark);
+  root.setAttribute('data-undo-text', prefs.undoText ? 'on' : 'off');
+  /* Whether the app's own box is wide enough to lay out for, which a media
+     query cannot answer: in frame mode the box is a dial, not the window. The
+     content cap and the fluid grids read this, so a 1200px frame gets the same
+     treatment a 1200px window does. 560 is the breakpoint the media queries
+     already use, kept in step deliberately. */
+  root.setAttribute('data-frame-wide',
+    prefs.desktopMode === 'frame' && +prefs.frameW >= 560 ? 'on' : 'off');
+  root.style.colorScheme = info.mode;
+
+  // continuous → inline custom properties (null means "leave it to the theme")
+  const radius = prefs.radius === null ? ch.radius : prefs.radius;
+  const border = prefs.border === null ? ch.border : prefs.border;
+  st.setProperty('--r-base',     radius + 'px');
+  st.setProperty('--bw',         border + 'px');
+  st.setProperty('--dens',        prefs.density);
+  st.setProperty('--icon-stroke', prefs.iconStroke);
+  // only claim the icons once the dial has actually been moved — see tokens.css
+  root.setAttribute('data-icon-stroke',
+    prefs.iconStroke === SCHEMA.iconStroke.def ? 'sprite' : 'custom');
+  /* Speed in, duration multiplier out: 2× fast is half as long. Clamped away
+     from zero so a pasted look carrying nonsense cannot divide by it. */
+  const speed = Math.max(.1, +prefs.motionSpeed || 1);
+  st.setProperty('--mo-scale', String(Math.round((1 / speed) * 1000) / 1000));
+  st.setProperty('--chrome-alpha',prefs.chromeAlpha);
+  st.setProperty('--readable',    prefs.contentWidth + 'px');
+  st.setProperty('--frame-w',     Math.round(+prefs.frameW || 420) + 'px');
+  st.setProperty('--frame-h',     Math.round(+prefs.frameH || 880) + 'px');
+  st.setProperty('--tex-mult',    prefs.textureAmount);
+  /* Whole pixels, and rounded here rather than trusted from the store: a
+     fraction in `--band-drop` reaches every header's padding *and* the band's
+     min-height, which is the exact shape of the bug this dial exists to stop
+     chasing (tokens.css). The three nav dials are rounded for the same
+     reason — a pill on a half pixel is a pill with a soft edge. */
+  st.setProperty('--band-drop',   Math.round(+prefs.bandDrop  || 0) + 'px');
+  st.setProperty('--nav-fh',      Math.round(+prefs.navHeight || 58) + 'px');
+  st.setProperty('--nav-r',       Math.round(+prefs.navRadius || 0) + 'px');
+  st.setProperty('--nav-icon',    Math.round(+prefs.navIcon   || 19) + 'px');
+  /* TOOLS' big button, sized in pixels and cornered as a share of that size —
+     see the pair in SCHEMA. Rounded here for the same reason the nav dials
+     are: half a pixel of radius is a soft edge, not a sharper one. */
+  st.setProperty('--tl-btn-size',  Math.round(+prefs.toolsBtnSize  || 74) + 'px');
+  st.setProperty('--tl-btn-round', Math.round(+prefs.toolsBtnRound || 0) + '%');
+
+  /* The custom tab palette, written inline rather than as a stylesheet block:
+     it is one hex per tab and the tabs it does not name are meant to fall
+     through to the shipped hues, which is exactly what removing the property
+     does. Each colour brings its own ink — a custom palette can hold a light
+     tab and a dark one, and one --tab-on-c for the lot would be unreadable on
+     one of them. This runs before the accent below reads a tab back. */
+  TAB_IDS.forEach(a => {
+    const v = prefs.tabPalette === 'custom' ? prefs.tabColors[a] : null;
+    if (v) {
+      st.setProperty(tabVar(a), v);
+      st.setProperty(tabVar(a) + '-ink', luminance(v) > 0.45 ? '#0b0b0b' : '#ffffff');
+    } else {
+      st.removeProperty(tabVar(a));
+      st.removeProperty(tabVar(a) + '-ink');
+    }
+  });
+
+  // accent — the tab's own colour where that is switched on, else the theme's
+  const tab = tabAccent();
+  const acc = tab ? tab.c : accentHex();
+  /* Only the accent itself and the colour drawn on top of it: tokens.css mixes
+     the three washes out of --y, so they follow automatically. */
+  if (acc) {
+    st.setProperty('--y', acc);
+    st.setProperty('--on-y', tab ? tab.ink : (luminance(acc) > 0.45 ? '#0b0b0b' : '#ffffff'));
+  } else {
+    st.removeProperty('--y');
+    st.removeProperty('--on-y');
+  }
+
+  // fonts
+  const d = resolvedDisplay(), m = resolvedMono();
+  st.setProperty('--mono', m.stack);
+  st.setProperty('--head', d.stack);
+
+  loadFonts();
+
+  // native reduced-motion always wins over a "full" preference
+  try {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches &&
+        prefs.motion === 'full') root.setAttribute('data-motion', 'reduced');
+  } catch {}
+
+  // address bar / status bar
+  requestAnimationFrame(() => {
+    const bg = getComputedStyle(root).getPropertyValue('--bg').trim();
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta && bg) meta.setAttribute('content', bg);
+  });
+}
+
+/* Preview a theme without saving it — used by the picker so hovering a card
+   shows the real thing. revert() puts the saved look back. */
+function preview(id) {
+  const info = THEMES.find(t => t.id === id);
+  if (!info) return;
+  root.setAttribute('data-theme', id);
+  // the light-mode corrections and the form controls' colour scheme key off
+  // the mode, so a light preset previewed from a dark one needs both to move
+  root.setAttribute('data-mode', info.mode);
+  root.style.colorScheme = info.mode;
+  const ch = THEME_CHARACTER[id];
+  if (prefs.radius === null) root.style.setProperty('--r-base', ch.radius + 'px');
+  if (prefs.border === null) root.style.setProperty('--bw', ch.border + 'px');
+  if (prefs.depth === 'auto')   root.setAttribute('data-depth', ch.depth);
+  if (prefs.texture === 'auto') root.setAttribute('data-texture', ch.texture);
+}
+const revert = apply;
+
+/* Haptics
+   A no-op wherever the Vibration API is missing (every iOS browser), which is
+   why it is off by default rather than advertised as working. */
+function tap(ms = 8) {
+  if (!prefs.haptics) return;
+  try { navigator.vibrate && navigator.vibrate(ms); } catch {}
+}
+
+/* Sound is synthesised on demand. Create AudioContext inside the first enabled
+   user gesture. Shell owns sound events; Prefs.tap remains haptic-only.
+   GAP suppresses overlapping events from the same gesture. */
+/* Voices define timbres; kits map events to voices. Per-event overrides win,
+   while auto follows the kit. Shell dispatches all events. lp is the lowpass cutoff. */
+const VOICES = {
+  /* clicky — a transient and almost no tail */
+  tick:  { type:'square',   hz: 2100, to: 1500, ms: 14, peak: 0.030, lp: 3200 },
+  click: { type:'triangle', hz: 1300, to:  900, ms: 18, peak: 0.038, lp: 4200 },
+  wood:  { type:'triangle', hz:  760, to:  520, ms: 22, peak: 0.048, lp: 2600 },
+  pop:   { type:'sine',     hz:  520, to:  240, ms: 26, peak: 0.052, lp: 1800 },
+  thunk: { type:'sine',     hz:  180, to:  110, ms: 44, peak: 0.070, lp:  900 },
+  /* tonal — the three 4.2 shipped, kept under their own names */
+  blip:  { type:'sine',     hz:  660, to:  560, ms: 32, peak: 0.045 },
+  swell: { type:'sine',     hz:  420, to:  520, ms: 46, peak: 0.040 },
+  chime: { type:'triangle', hz:  880, to: 1180, ms: 55, peak: 0.035 },
+  glass: { type:'sine',     hz: 1760, to: 2100, ms: 52, peak: 0.026 },
+  /* the tenth is silence, and it is a real answer: "not for that one" */
+  none:  null,
+};
+const VOICE_IDS = Object.keys(VOICES);
+
+const SOUND_EVENTS = [
+  { k:'tap',  label:'a control',   hint:'anything pressable, on the way down' },
+  { k:'nav',  label:'a tab',       hint:'the slide actually changing' },
+  { k:'menu', label:'a menu',      hint:'a sheet, a dialog or an overlay opening' },
+  { k:'done', label:'completing',  hint:'ticking something off — not un-ticking it' },
+  { k:'msg',  label:'a message',   hint:'a toast, and the undo pill' },
+];
+const SOUND_EVENT_KEYS = SOUND_EVENTS.map(e => e.k);
+
+const SOUND_KITS = {
+  tick:    { tap:'tick',  nav:'click', menu:'wood',  done:'pop',   msg:'blip'  },
+  classic: { tap:'blip',  nav:'swell', menu:'swell', done:'blip',  msg:'chime' },
+  wood:    { tap:'wood',  nav:'thunk', menu:'wood',  done:'pop',   msg:'wood'  },
+  glass:   { tap:'glass', nav:'blip',  menu:'chime', done:'chime', msg:'glass' },
+  minimal: { tap:'tick',  nav:'none',  menu:'none',  done:'tick',  msg:'none'  },
+};
+const SOUND_KIT_IDS = Object.keys(SOUND_KITS);
+
+/* The one place the kit and the five overrides are resolved. An override is
+   only honoured if it names a voice that exists, so a kit renamed out from
+   under a stored value falls back rather than going silent. */
+function voiceOf(event) {
+  const kit = SOUND_KITS[prefs.soundKit] || SOUND_KITS.tick;
+  const own = prefs['snd' + event.charAt(0).toUpperCase() + event.slice(1)];
+  const id = (own && own !== 'auto' && VOICE_IDS.includes(own)) ? own : kit[event];
+  return VOICES[id] || null;
+}
+
+const GAP = 55;
+let ac = null, lastSound = 0;
+/* `event` is one of SOUND_EVENT_KEYS. A raw voice id is also accepted, which
+   is what the settings panel's preview passes — it wants to play *that* sound,
+   not whatever the map currently points at. */
+function sound(event = 'tap') {
+  if (!prefs.sounds) return;
+  const v = SOUND_EVENT_KEYS.includes(event) ? voiceOf(event) : VOICES[event];
+  if (!v) return;                            // `none`, or a name nothing knows
+  const now = Date.now();
+  if (now - lastSound < GAP) return;
+  lastSound = now;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!ac) ac = new AC();
+    /* A context built before the first gesture — or suspended when the tab went
+       away — answers with silence until it is resumed. Asking is cheap and the
+       promise is ignored: if it is refused there is simply no sound. */
+    if (ac.state === 'suspended' && ac.resume) { const r = ac.resume(); if (r && r.catch) r.catch(() => {}); }
+    const t = ac.currentTime, dur = v.ms / 1000;
+    const osc = ac.createOscillator(), gain = ac.createGain();
+    osc.type = v.type;
+    osc.frequency.setValueAtTime(v.hz, t);
+    osc.frequency.exponentialRampToValueAtTime(v.to, t + dur);
+    /* Ramped, never switched: a gain that steps to a value clicks, and a click
+       is the one thing a sound this quiet cannot afford. The floor is not zero
+       because an exponential ramp cannot reach it. */
+    const peak = Math.max(0.0005, v.peak * level());
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(peak, t + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    /* One filter, and only where the voice asks for one — a lowpass on a sine
+       is a node that does nothing, and every node here is built and thrown
+       away on every press. */
+    let tail = gain;
+    if (v.lp && ac.createBiquadFilter) {
+      const lp = ac.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.setValueAtTime(v.lp, t); lp.Q.setValueAtTime(0.7, t);
+      gain.connect(lp); tail = lp;
+    }
+    osc.connect(gain); tail.connect(ac.destination);
+    osc.start(t); osc.stop(t + dur + 0.02);
+  } catch {}
+}
+function level() {
+  const n = +prefs.soundLevel;
+  return Number.isFinite(n) ? Math.min(1, Math.max(0.05, n)) : SCHEMA.soundLevel.def;
+}
+
+/* Formatting helpers, so the four modules format dates the same way */
+function formatDate(iso, style) {
+  const s = style || prefs.dateFormat;
+  const d = new Date(iso + 'T00:00:00');
+  if (isNaN(d)) return iso;
+  if (s === 'iso')   return iso;
+  if (s === 'short') return d.toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' });
+  return d.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+}
+
+/* Boot */
+load();
+apply();
+
+// follow the OS when asked to
+try {
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  const onFlip = () => { if (prefs.themeMode === 'system') { apply(); notify('theme'); } };
+  mq.addEventListener ? mq.addEventListener('change', onFlip) : mq.addListener(onFlip);
+} catch {}
+
+return { THEMES, ACCENTS, DISPLAY_FONTS, MONO_FONTS, SCHEMA, THEME_CHARACTER, APPS, TAB_IDS, tabVar,
+         SOUND_KITS, SOUND_KIT_IDS, SOUND_EVENTS, SOUND_EVENT_KEYS, VOICE_IDS,
+         get, set, setMany, all, reset, resetAll, subscribe, setApp,
+         apply, preview, revert, activeTheme, themeInfo, character,
+         resolvedDisplay, resolvedMono, accentHex, normHex, luminance,
+         tap, sound, formatDate, KEY };
+})();

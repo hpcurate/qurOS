@@ -1,0 +1,375 @@
+/* Settings panels, preference controls and content editors. */
+
+.ns-set .scr{display:none;min-height:100%;padding-bottom:var(--scr-pad-b)}
+.ns-set .scr.on{display:block}
+/* the band's box is shell.css's, shared by every app */
+.ns-set .h-label{font:700 10px/1 var(--head);letter-spacing:.16em;text-transform:var(--caps);color:var(--tx-2)}
+.ns-set .h-logo{font-weight:800;font-family:var(--head);letter-spacing:-.02em}
+.ns-set .h-logo em{font-style:normal}
+
+/* Home menu
+   The apps kept out of the bar, as tappable tiles with their tab icon, then
+   the three categories as rows. A category is a sub-screen with the same
+   sticky back header the apps use for theirs. */
+.ns-set .set-home{padding:0 18px}
+.ns-set .set-apps{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px}
+.ns-set .set-app-b{display:flex;align-items:center;gap:11px;text-align:left;
+  background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r2);
+  padding:13px 14px;cursor:pointer;color:var(--tx);box-shadow:var(--shadow);transition:border-color var(--dur-1)}
+.ns-set .set-app-b svg{width:20px;height:20px;flex:0 0 auto;color:var(--y)}
+.ns-set .set-app-b span{font:700 11px/1 var(--head);letter-spacing:.1em;text-transform:var(--caps);min-width:0}
+.ns-set .set-app-b small{display:block;font:400 9px/1.3 var(--mono);letter-spacing:.04em;color:var(--mu);
+  margin-top:4px;text-transform:none}
+/* the search row at the top of the menu: the same tile as an app's, wearing
+   the accent, because it is the fastest way to anything below it */
+.ns-set .set-search{display:flex;align-items:center;gap:11px;width:100%;text-align:left;
+  background:var(--y-fade);border:var(--bw) solid var(--yb);border-radius:var(--r2);
+  padding:13px 14px;margin-bottom:18px;cursor:pointer;color:var(--tx);transition:border-color var(--dur-1)}
+.ns-set .set-search svg{width:20px;height:20px;flex:0 0 auto;color:var(--y)}
+.ns-set .set-search span{font:700 11px/1 var(--head);letter-spacing:.1em;text-transform:var(--caps);min-width:0}
+.ns-set .set-search small{display:block;font:400 9px/1.3 var(--mono);letter-spacing:.04em;color:var(--mu);
+  margin-top:4px;text-transform:none}
+.ns-set .set-search b{color:var(--y);font-weight:400}
+.ns-set .set-cats{display:flex;flex-direction:column;gap:8px}
+.ns-set .set-cat-b{display:grid;grid-template-columns:1fr auto;column-gap:12px;align-items:center;text-align:left;
+  background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r2);
+  padding:16px;cursor:pointer;color:var(--tx);box-shadow:var(--shadow);transition:border-color var(--dur-1)}
+.ns-set .set-cat-n{font:800 14px/1 var(--head);letter-spacing:.08em;text-transform:var(--caps)}
+.ns-set .set-cat-b small{font:400 9px/1.4 var(--mono);color:var(--mu);letter-spacing:.04em;margin-top:5px}
+.ns-set .set-cat-b i{grid-column:2;grid-row:1 / span 2;font:400 14px/1 var(--mono);color:var(--y);font-style:normal}
+
+.ns-set .hd{position:sticky;top:0;z-index:10;background:var(--bg);border-bottom:var(--bw) solid var(--bd);
+  padding:calc(var(--hd-pad) + var(--sat)) 18px var(--hd-pad);display:flex;align-items:center;gap:14px;margin-bottom:14px}
+.ns-set .hd-back{background:none;border:none;color:var(--y);font:400 12px/1 var(--mono);cursor:pointer;letter-spacing:.06em;padding:4px 0}
+.ns-set .hd-title{font:800 var(--hd-title-px)/1 var(--head);letter-spacing:.1em;text-transform:var(--caps);text-shadow:var(--title-sh-x) 0 0 var(--title-sh-c);flex:1}
+/* the live preview sticks below the category header rather than under it */
+.ns-set .preview{top:calc(52px + var(--sat))}
+
+/* Segmented control
+   Seven app pills, so it scrolls sideways and the active chip is scrolled into
+   view by SET.panel() rather than left off the edge.
+
+   touch-action:pan-x is not optional here. #track claims pan-y for the app
+   swipe, and a gesture is resolved by intersecting touch-action up the ancestor
+   chain, so overflow-x:auto alone gives a strip that scrolls under a mouse and
+   does nothing at all under a finger. */
+.set-seg{display:flex;gap:6px;padding:0 18px 4px;overflow-x:auto;scrollbar-width:none;touch-action:pan-x pan-y;
+  margin-bottom:16px;scroll-padding:0 18px}
+.set-seg::-webkit-scrollbar{display:none}
+.seg-b{flex:0 0 auto;background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r-pill);
+  color:var(--mu);font:700 10px/1 var(--head);letter-spacing:.12em;text-transform:var(--caps);
+  padding:10px 15px;cursor:pointer;transition:all var(--dur-1)}
+.seg-b.on{background:var(--y);border-color:var(--y);color:var(--on-y)}
+
+.set-panel{display:none;padding:0 18px}
+.set-panel.on{display:block}
+
+/* Shared furniture */
+.ns-set .sec{font:700 10px/1 var(--head);letter-spacing:.15em;text-transform:var(--caps);color:var(--y);
+  margin:24px 0 12px;padding-bottom:8px;border-bottom:var(--bw) solid var(--bd);
+  display:flex;align-items:center;justify-content:space-between;gap:10px}
+.ns-set .sec:first-child{margin-top:0}
+.ns-set .sec-reset{background:none;border:none;color:var(--mu);cursor:pointer;
+  font:400 9px/1 var(--mono);letter-spacing:.08em;text-transform:none;padding:2px 0}
+.ns-set .sec-reset:active,.ns-set .sec-reset:hover{color:var(--y)}
+.ns-set .sec-reset.hidden{display:none}
+
+.ns-set .data-warn,.ns-set .set-note{font:400 10px/1.6 var(--mono);color:var(--mu);
+  padding:12px 14px;margin-bottom:14px;
+  background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1)}
+
+/* Explain the controls toggles section notes and control hints together.
+   Keep control names, headings and home category descriptions visible. */
+[data-tips="off"] .ns-set .data-warn,
+[data-tips="off"] .ns-set .set-note,
+[data-tips="off"] .ns-set .setting-lbl small,
+[data-tips="off"] .ns-set .slider-head .lbl em,
+[data-tips="off"] .ns-set .opt-set > .lbl em{display:none}
+/* the label is the whole row once its hint is gone, so it stops reserving the
+   two-line height the hint used to fill */
+[data-tips="off"] .ns-set .setting-lbl{line-height:1.2}
+
+.ns-set .setting-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+  padding:13px 14px;margin-bottom:8px}
+.ns-set .setting-lbl{font:400 11px/1.4 var(--mono);letter-spacing:.06em;color:var(--tx-2)}
+.ns-set .setting-lbl small{display:block;color:var(--mu);font-size:9px;margin-top:4px;letter-spacing:.04em}
+.ns-set .setting-btn{background:var(--s2);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+  color:var(--tx);font:400 10px/1 var(--mono);letter-spacing:.08em;
+  padding:9px 13px;cursor:pointer;transition:all var(--dur-1);white-space:nowrap}
+.ns-set .setting-btn:active{border-color:var(--y);color:var(--y)}
+/* a picked one in a row of them — LOG's alert preview */
+.ns-set .setting-btn.on{border-color:var(--y);color:var(--y);background:var(--y-fade)}
+.ns-set .setting-btn.danger{color:var(--re)}
+/* the rebind buttons hold their width so the row does not jump between a
+   one-character binding and "press a key" */
+.ns-set .key-cap{min-width:104px;text-align:center}
+
+/* Sync — one block per route, so the two never read as one control with two
+   destinations. The route's name and what it carries sit on the same line:
+   which apps travel by which route is the thing you actually need to know. */
+.ns-set .sync-route{border:var(--bw) solid var(--bd);border-radius:var(--r2);
+  padding:calc(12px * var(--dens)) calc(13px * var(--dens));margin-bottom:10px;background:var(--s1)}
+.ns-set .sync-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.ns-set .sync-name{font:700 11px/1 var(--head);letter-spacing:.12em;text-transform:var(--caps);color:var(--tx)}
+.ns-set .sync-apps{font:400 9.5px/1.4 var(--mono);letter-spacing:.05em;color:var(--mu)}
+.ns-set .sync-when{font:400 10px/1.5 var(--mono);letter-spacing:.04em;color:var(--tx-2);margin:6px 0 10px}
+.ns-set .sync-route .td-acts{margin:0}
+.ns-set .sync-tog{display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer;
+  font:400 10px/1.4 var(--mono);letter-spacing:.04em;color:var(--mu)}
+.ns-set .sync-tog input{accent-color:var(--y);width:14px;height:14px;cursor:pointer}
+/* the small print under a switch that trades privacy for convenience — it is
+   the one place in this panel where the reason matters more than the label */
+.ns-set .sync-fine{font:400 9.5px/1.6 var(--mono);letter-spacing:.03em;color:var(--mu);
+  margin-top:7px}
+.ns-set .sync-fine b{color:var(--tx-2);font-weight:400}
+
+/* The overlap sheet's rows. Each is one thing that was written on both
+   devices; the chips are the answer, not a preference. */
+.ns-set .setting-btn.danger:active{border-color:var(--re)}
+
+.ns-set .btn{width:100%;background:var(--y);border:none;border-radius:var(--r1);color:var(--on-y);
+  font:700 14px/1 var(--head);letter-spacing:.1em;text-transform:var(--caps);
+  padding:15px;cursor:pointer;margin-top:6px;transition:opacity var(--dur-1)}
+.ns-set .btn:active{opacity:.82}
+.ns-set .btn-2{background:var(--s2);color:var(--tx);border:var(--bw) solid var(--bd)}
+.ns-set .btn-danger{background:var(--re);color:#fff}
+
+.ns-set .f{margin-bottom:14px}
+.ns-set .lbl{display:block;font:400 9px/1 var(--mono);letter-spacing:.14em;text-transform:var(--caps);
+  color:var(--mu);margin-bottom:7px}
+.ns-set input[type=text],.ns-set input[type=password],.ns-set input[type=number],
+.ns-set textarea,.ns-set select{
+  width:100%;background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+  color:var(--tx);font:400 13px/1.5 var(--mono);padding:11px 12px;outline:none;
+  -webkit-appearance:none;appearance:none;transition:border-color var(--dur-1)}
+.ns-set textarea{min-height:88px;resize:vertical}
+.ns-set select{cursor:pointer;background-image:none}
+.ns-set input:focus,.ns-set textarea:focus,.ns-set select:focus{border-color:var(--y)}
+
+/* a number field sitting in a setting row is a small right-hand box, not the
+   full-width field the form rule above makes it */
+.ns-set .setting-row input[type=number],.ns-set .setting-row input[type=text]{
+  width:76px;flex:0 0 auto;text-align:center;padding:8px 6px;font-size:12px}
+.ns-set .setting-row select{width:auto;flex:0 0 auto}
+
+/* The app list (layout → navigation) */
+.ns-set .app-row.off .setting-lbl{color:var(--mu)}
+.ns-set .app-acts{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.ns-set .app-acts .setting-btn{padding:7px 9px;font-size:11px}
+.ns-set .app-acts .setting-btn:disabled{opacity:.3;pointer-events:none}
+
+.ns-set .data-stat{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+  padding:14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.ns-set .data-stat-k{font:400 10px/1 var(--mono);letter-spacing:.08em;text-transform:var(--caps);color:var(--mu)}
+.ns-set .data-stat-v{font:700 13px/1 var(--mono);color:var(--tx)}
+
+/* A status box sits under whatever produced it, so it needs a gap above as
+   well as below — without one it butted straight onto the row of buttons it
+   reports on and read as part of that row. */
+.ns-set .td-status{font:400 10px/1.6 var(--mono);color:var(--mu);letter-spacing:.04em;
+  padding:10px 12px;margin:calc(12px * var(--dens)) 0 8px;border-radius:var(--r1);
+  background:var(--s1);border:var(--bw) solid var(--bd);word-break:break-word}
+.ns-set .td-status.good{color:var(--gr);border-color:color-mix(in srgb,var(--gr) 40%,transparent)}
+.ns-set .td-status.bad{color:var(--re);border-color:color-mix(in srgb,var(--re) 40%,transparent)}
+.ns-set .td-status.busy{color:var(--y);border-color:var(--yb)}
+.ns-set .td-acts{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.ns-set .td-acts .setting-btn{text-align:center}
+
+/* The content editors close every app panel. They are a section of their own —
+   often straight after a danger button — so they carry the gap a new section
+   deserves rather than sitting on whatever came last. */
+.ns-set .set-content{display:block;margin-top:calc(26px * var(--dens))}
+.ns-set .set-content:empty{margin-top:0}
+
+/* Theme gallery */
+.theme-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:6px}
+.theme-card{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r2);
+  padding:12px;cursor:pointer;text-align:left;transition:border-color var(--dur-1),transform var(--dur-1);
+  display:block;position:relative}
+.theme-card.on{border-color:var(--y)}
+.theme-card:active{transform:scale(.985)}
+.theme-swatch{display:flex;gap:3px;margin-bottom:10px;height:30px}
+.theme-swatch i{flex:1;border-radius:var(--r1);border:1px solid rgba(128,128,128,.2)}
+.theme-swatch i:nth-child(3){flex:1.4}
+.theme-name{font:700 11px/1 var(--head);letter-spacing:.1em;text-transform:var(--caps);color:var(--tx);
+  display:flex;align-items:center;justify-content:space-between;gap:8px}
+.theme-name .tick{color:var(--y);font:400 11px/1 var(--mono)}
+.theme-card:not(.on) .tick{visibility:hidden}
+.theme-desc{font:400 9px/1.5 var(--mono);color:var(--mu);letter-spacing:.03em;margin-top:5px}
+
+/* Accent picker */
+.acc-grid{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.acc-b{width:34px;height:34px;border-radius:var(--r-pill);border:2px solid transparent;
+  cursor:pointer;padding:0;position:relative;background:var(--s2);
+  transition:transform var(--dur-1),border-color var(--dur-1)}
+.acc-b i{position:absolute;inset:3px;border-radius:var(--r-pill);display:block}
+.acc-b.on{border-color:var(--tx)}
+.acc-b:active{transform:scale(.9)}
+.acc-b.theme-acc i{background:linear-gradient(135deg,var(--y),var(--s2))}
+.acc-custom-row{display:flex;gap:8px;align-items:center}
+.acc-custom-row input[type=color]{width:46px;height:38px;padding:2px;background:var(--s1);
+  border:var(--bw) solid var(--bd);border-radius:var(--r1);cursor:pointer;flex:0 0 auto}
+.acc-custom-row input[type=text]{flex:1}
+
+/* Option rows: a label, then a row of chips */
+.opt-set{margin-bottom:14px}
+.opt-set > .lbl{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.opt-set > .lbl em{font-style:normal;color:var(--tx-2);letter-spacing:.04em;text-transform:none}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+  color:var(--mu);font:400 10px/1 var(--mono);letter-spacing:.06em;
+  padding:9px 11px;cursor:pointer;transition:all var(--dur-1)}
+.chip.on{background:var(--yd);border-color:var(--y);color:var(--y)}
+
+/* Sliders */
+.slider-row{margin-bottom:16px}
+.slider-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px}
+/* a slider's hint reads like a chip set's: under the name, not beside it, so a
+   long one does not push the readout off the row */
+.slider-head .lbl em{display:block;font-style:normal;color:var(--tx-2);
+  letter-spacing:.04em;text-transform:none;margin-top:5px;line-height:1.5}
+.slider-head .lbl{min-width:0;flex:1}
+.slider-head .lbl{margin-bottom:0}
+.slider-val{font:700 11px/1 var(--mono);color:var(--y);letter-spacing:.04em}
+.slider-val.is-auto{color:var(--mu);font-weight:400}
+input[type=range].sl{
+  -webkit-appearance:none;appearance:none;width:100%;height:22px;background:transparent;cursor:pointer;
+  display:block}
+input[type=range].sl::-webkit-slider-runnable-track{
+  height:3px;background:var(--bd-2);border-radius:var(--r-pill)}
+input[type=range].sl::-moz-range-track{
+  height:3px;background:var(--bd-2);border-radius:var(--r-pill)}
+input[type=range].sl::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:16px;height:16px;margin-top:-6.5px;
+  border-radius:var(--r-pill);background:var(--y);border:none;box-shadow:var(--shadow)}
+input[type=range].sl::-moz-range-thumb{
+  width:16px;height:16px;border-radius:var(--r-pill);background:var(--y);border:none}
+
+/* Toggles */
+.tog{position:relative;width:42px;height:24px;border-radius:var(--r-pill);flex:0 0 auto;
+  background:var(--s2);border:var(--bw) solid var(--bd);cursor:pointer;padding:0;
+  transition:background var(--dur-1),border-color var(--dur-1)}
+.tog::after{content:'';position:absolute;top:50%;left:3px;transform:translateY(-50%);
+  width:16px;height:16px;border-radius:var(--r-pill);background:var(--mu);
+  transition:transform var(--dur-2) var(--ease-out),background var(--dur-1)}
+.tog.on{background:var(--yd);border-color:var(--y)}
+.tog.on::after{transform:translateY(-50%) translateX(18px);background:var(--y)}
+
+/* Live preview
+   A miniature of the app's real furniture, built out of the same tokens, so the
+   dials can be judged without leaving the panel. It is sticky: on a phone the
+   slider you are dragging is often below the fold otherwise. */
+.preview{position:sticky;top:8px;z-index:5;margin-bottom:18px;
+  background:var(--bg);border:var(--bw) solid var(--bd);border-radius:var(--r2);
+  padding:calc(14px * var(--dens));box-shadow:var(--shadow-lift)}
+.pv-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px}
+.pv-logo{font:800 20px/1 var(--head);letter-spacing:-.02em;color:var(--tx)}
+.pv-logo em{color:var(--y);font-style:normal}
+.pv-tag{font:700 8px/1 var(--head);letter-spacing:.16em;text-transform:var(--caps);color:var(--mu)}
+.pv-row{display:grid;grid-template-columns:1fr 1fr;gap:calc(7px * var(--dens));margin-bottom:9px}
+.pv-card{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r2);
+  padding:calc(11px * var(--dens));box-shadow:var(--shadow)}
+.pv-card-t{font:700 10px/1 var(--head);letter-spacing:.08em;text-transform:var(--caps);color:var(--tx)}
+.pv-card-s{font:400 9px/1 var(--mono);color:var(--mu);margin-top:6px}
+.pv-bar{height:4px;border-radius:var(--r-pill);background:var(--s2);overflow:hidden;margin-bottom:9px}
+.pv-bar i{display:block;height:100%;width:62%;background:var(--y);border-radius:var(--r-pill)}
+.pv-btns{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+.pv-btn{background:var(--y);color:var(--on-y);border:none;border-radius:var(--r1);
+  font:700 9px/1 var(--head);letter-spacing:.1em;text-transform:var(--caps);
+  padding:calc(9px * var(--dens)) calc(12px * var(--dens));box-shadow:var(--shadow)}
+.pv-btn.ghost{background:var(--s2);color:var(--tx-2);border:var(--bw) solid var(--bd)}
+.pv-btn.acc{background:var(--yd);color:var(--y);border:var(--bw) solid var(--yb)}
+[data-caps="off"] .pv-card-t,[data-caps="off"] .pv-btn,[data-caps="off"] .pv-tag{text-transform:none}
+
+/* Content editors
+   One shape for every collection: a stack of cards, each with a header row of
+   inputs and a body that is either more inputs or a one-per-line textarea. */
+.ed-card{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r2);
+  padding:12px;margin-bottom:8px;box-shadow:var(--shadow)}
+.ed-head{display:flex;gap:6px;align-items:center;margin-bottom:9px}
+.ed-head input[type=text]{flex:1;min-width:0;font-size:12px;padding:9px 10px}
+.ed-head input[type=number]{width:66px;flex:0 0 auto;font-size:12px;padding:9px 10px;text-align:center}
+.ed-head select{flex:0 0 auto;width:auto;min-width:96px;font-size:11px;padding:9px 8px}
+.ed-swatch{width:34px;height:34px;flex:0 0 auto;padding:2px;background:var(--s2);
+  border:var(--bw) solid var(--bd);border-radius:var(--r1);cursor:pointer}
+.ed-del{flex:0 0 auto;width:34px;height:34px;background:var(--s2);border:var(--bw) solid var(--bd);
+  border-radius:var(--r1);color:var(--mu);font:400 14px/1 var(--mono);cursor:pointer;
+  transition:all var(--dur-1)}
+.ed-del:active,.ed-del:hover{color:var(--re);border-color:var(--re)}
+.ed-hint{font:400 9px/1.5 var(--mono);color:var(--mu);letter-spacing:.03em;margin-top:6px}
+.ed-add{width:100%;background:var(--s2);border:var(--bw) dashed var(--bd-2);border-radius:var(--r1);
+  color:var(--tx-2);font:400 11px/1 var(--mono);letter-spacing:.08em;padding:13px;cursor:pointer;
+  transition:all var(--dur-1);margin-bottom:6px}
+.ed-add:active,.ed-add:hover{color:var(--y);border-color:var(--y)}
+/* An area is a card holding cards: CREATE's editor edits a tree, not a list —
+   an area's own fields, and then the stages it walks nested inside it. The
+   nesting is a rail down the left edge in the area's own colour rather than a
+   second border, so three levels of box do not stack up on a phone. */
+.ed-area{border-left:2px solid var(--bd);border-radius:var(--r1);
+  padding:12px 0 4px 12px;margin-bottom:14px}
+.ed-area > input[type=text]{width:100%;font-size:12px;padding:9px 10px}
+.ed-area .ed-hint b{color:var(--tx-2);font-weight:400}
+.ed-area .ed-add{margin-top:8px}
+.ed-add-area{border-style:solid}
+.ed-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
+.ed-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);padding:10px 12px}
+.ed-toggle span{font:400 10px/1 var(--mono);color:var(--tx-2);letter-spacing:.04em}
+.ed-pair{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+.ed-pair .lbl{margin-bottom:5px}
+/* which of an area's optional chips it asks for — a row of real checkboxes,
+   because three of them read as one question and three toggles would not */
+.ed-flags{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:8px}
+.ed-flag{display:flex;align-items:center;gap:6px;cursor:pointer;
+  font:400 10px/1 var(--mono);letter-spacing:.06em;text-transform:var(--caps);color:var(--tx-2)}
+.ed-flag input{accent-color:var(--y);width:14px;height:14px;margin:0;cursor:pointer}
+.ed-badge{font:400 9px/1 var(--mono);color:var(--mu);letter-spacing:.06em;
+  border:var(--bw) solid var(--bd);border-radius:var(--r-pill);padding:4px 8px;flex:0 0 auto}
+
+/* Storage bars */
+.st-meter{height:5px;border-radius:var(--r-pill);background:var(--s2);overflow:hidden;margin-top:9px}
+.st-meter i{display:block;height:100%;background:var(--y)}
+.st-legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
+.st-legend span{font:400 9px/1 var(--mono);color:var(--mu);display:flex;align-items:center;gap:5px}
+.st-legend i{width:8px;height:8px;border-radius:2px;display:block}
+
+@media (hover:hover) and (pointer:fine){
+  .seg-b:hover{border-color:var(--mu)}
+  .seg-b.on:hover{border-color:var(--y)}
+  .theme-card:hover{border-color:var(--mu)}
+  .theme-card.on:hover{border-color:var(--y)}
+  .chip:hover{border-color:var(--mu)}
+  .chip.on:hover{border-color:var(--y)}
+  .acc-b:hover{transform:scale(1.08)}
+  .ns-set .setting-btn:hover{border-color:var(--mu)}
+  .ns-set .btn:hover{opacity:.9}
+  .ns-set .set-app-b:hover,.ns-set .set-cat-b:hover{border-color:var(--mu)}
+  .ns-set .hd-back:hover{color:var(--y)}
+}
+
+/* Stage palettes
+   A grid of ramps under an area's stages: the six colours as one strip, the
+   name under it. The strip is the control — a palette is picked by looking at
+   it, not by reading what it is called — so the swatches get the height and
+   the name is a caption. */
+.ed-pals{display:grid;grid-template-columns:repeat(auto-fit, minmax(88px, 1fr));gap:6px;margin-top:8px}
+.ed-pal{background:var(--s2);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+  padding:6px;cursor:pointer;display:flex;flex-direction:column;gap:5px;text-align:left}
+.ed-pal:active,.ed-pal:hover{border-color:var(--y)}
+.ed-pal-sw{display:flex;height:12px;border-radius:calc(var(--r1) * .6);overflow:hidden}
+.ed-pal-sw i{flex:1 1 0}
+.ed-pal-n{font:400 9px/1 var(--mono);letter-spacing:.06em;text-transform:var(--caps);color:var(--tx-2)}
+
+/* The sound map
+   Five rows of voice chips under the kit. Indented and hairlined off to the
+   left so it reads as belonging to the kit above it rather than as five more
+   top-level settings — it is the kit, opened up. */
+.snd-map{margin:0 0 14px;padding-left:12px;border-left:var(--bw) solid var(--bd)}
+.snd-map .opt-set{margin-bottom:10px}
+.snd-map .opt-set:last-child{margin-bottom:0}
+.snd-map .chips{gap:4px}
+/* A control that will not make a noise yet still says what it is set to; it is
+   dimmed rather than disabled, because picking a kit before turning sound on
+   is a reasonable order to do it in. */
+.opt-set.is-off > .lbl,.opt-set.is-off .chips{opacity:.55}

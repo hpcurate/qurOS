@@ -1,0 +1,489 @@
+/* TOOLS instruments; shared theme tokens. Keep tab-strip styling aligned with CREATE. */
+
+.ns-tools .scr{display:none;min-height:100%;padding-bottom:var(--scr-pad-b)}
+.ns-tools .scr.on{display:block}
+
+/* the band's box is shell.css's, shared by every app */
+.ns-tools .h-label{font:700 10px/1 var(--head);letter-spacing:.16em;text-transform:var(--caps);color:var(--tx-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ns-tools .h-logo{font-weight:800;font-family:var(--head);letter-spacing:-.02em}
+.ns-tools .h-logo em{font-style:normal}
+.ns-tools .h-logo-row{display:flex;align-items:center;justify-content:space-between;gap:calc(14px * var(--dens))}
+
+.ns-tools .cnt{padding:0 calc(18px * var(--dens))}
+
+.ns-tools .tl-sec{font:400 9px/1 var(--mono);letter-spacing:2px;color:var(--mu);text-transform:var(--caps);
+  margin:calc(26px * var(--dens)) 0 calc(10px * var(--dens));
+  display:flex;justify-content:space-between;align-items:baseline;gap:calc(10px * var(--dens))}
+.ns-tools .tl-sec em{font-style:normal;color:var(--bd-2)}
+
+/* the strip
+   CREATE's tab strip, and it is a deliberate copy — ROOT.md §6 names the set,
+   because three copies of one shape are three things that can drift. Bordered
+   rail, flat chips, a glider that slides under the live one, even shares of the
+   width with max-content as the floor so a word is never squashed. */
+.ns-tools .tl-tabs{position:relative;display:flex;background:var(--s1);
+  border:var(--bw) solid var(--bd);border-radius:var(--r2);padding:calc(3px * var(--dens));
+  margin:0 0 calc(18px * var(--dens));
+  overflow-x:auto;overflow-y:hidden;scrollbar-width:none;touch-action:pan-x pan-y}
+.ns-tools .tl-tabs::-webkit-scrollbar{display:none}
+.ns-tools .tl-tglide{position:absolute;top:calc(3px * var(--dens));bottom:calc(3px * var(--dens));
+  left:0;width:0;background:var(--y);border-radius:var(--r2);z-index:1;
+  transition:transform .28s cubic-bezier(.4,0,.2,1),width .28s cubic-bezier(.4,0,.2,1)}
+.ns-tools .tl-tab{position:relative;z-index:2;background:none;border:none;cursor:pointer;
+  flex:1 1 0;min-width:max-content;white-space:nowrap;
+  display:flex;align-items:center;justify-content:center;text-align:center;
+  font:700 10px/1 var(--head);letter-spacing:.12em;text-transform:var(--caps);
+  color:var(--mu);padding:calc(11px * var(--dens)) calc(13px * var(--dens));
+  border-radius:var(--r2);transition:color .25s}
+.ns-tools .tl-tab.active{color:var(--on-y)}
+
+/* the readout
+   One ring for both instruments: an SVG circle whose dash offset is the
+   fraction left. A dash offset rather than a conic-gradient because it is the
+   property a browser can animate without repainting a gradient every frame,
+   and because it is the same drawing at any size.
+
+   The ring is not the control. Nothing here is tappable except the buttons
+   under it — a big circle that is also a button is a big circle you press by
+   accident while reading it. */
+/* The phase colours are on the readout whatever it is drawn as, so a layout is
+   only ever a drawing — it never has to restate what colour a break is. */
+.ns-tools .tl-body{--tl-c:var(--y)}
+.ns-tools .focus{--tl-c:var(--y)}
+.ns-tools .break{--tl-c:#3fc9b0}
+/* the breathing round's three phases, each its own colour: the breath is cool
+   and moving, the hold is the one that costs something, the recovery is the
+   green you are heading back to */
+.ns-tools .whf{--tl-c:#5ad4e6}
+.ns-tools .whf.hold{--tl-c:#e8a33d}
+.ns-tools .whf.recover{--tl-c:#5cdb7d}
+.ns-tools .whf.ready{--tl-c:var(--bd-2)}
+
+.ns-tools .tl-ring{position:relative;width:min(232px, 62vw);aspect-ratio:1;margin:calc(10px * var(--dens)) auto 0}
+.ns-tools .tl-ring svg{width:100%;height:100%;display:block;transform:rotate(-90deg)}
+.ns-tools .tl-ring circle{fill:none;stroke-width:9;stroke-linecap:round}
+.ns-tools .tl-ring .tr{stroke:var(--s2)}
+.ns-tools .tl-ring .tp{stroke:var(--tl-c);transition:stroke-dashoffset .24s linear}
+/* While a phase is running the ring carries a wash of its own colour behind
+   it, so the instrument's state is legible from across the room rather than
+   only from the digits. */
+.ns-tools .tl-ring.live::before{content:'';position:absolute;inset:14%;border-radius:50%;
+  background:radial-gradient(circle, color-mix(in srgb, var(--tl-c) 16%, transparent) 0%, transparent 70%)}
+/* The breath is an animation, not a readout: the disc under the digits swells
+   on the way in and settles on the way out, at whatever pace the dial says.
+   --tl-breath is written by tools.js from the same fraction the ring uses. */
+.ns-tools .tl-ring.breathe::before{
+  transform:scale(calc(.72 + var(--tl-breath, 0) * .38));
+  transition:transform .2s linear}
+.ns-tools .tl-ring.hold::before{inset:10%;
+  background:radial-gradient(circle, color-mix(in srgb, var(--tl-c) 22%, transparent) 0%, transparent 72%)}
+
+.ns-tools .tl-read{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:calc(6px * var(--dens))}
+/* tabular figures, or every second is a different width and the whole readout
+   twitches — the same reason LOG's and DAY's day numbers ask for them */
+.ns-tools .tl-big{font:800 clamp(30px, 9.5vw, 42px)/1 var(--head);letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;color:var(--tx);
+  text-shadow:var(--title-sh-x) 0 0 var(--title-sh-c)}
+.ns-tools .tl-sub{font:400 9.5px/1.3 var(--mono);letter-spacing:.08em;text-transform:var(--caps);
+  color:var(--tx-2);text-align:center;max-width:80%}
+
+/* ── bar: a departure board ──────────────────────────────────────────────────
+   No container and no circle. The time is set very large in tabular figures,
+   left-aligned like something printed rather than centred like something
+   drawn, and a hairline under it fills left to right. The whole layout is one
+   horizontal rule and two lines of type. */
+.ns-tools .tl-bar{margin:calc(16px * var(--dens)) 0 0}
+.ns-tools .tl-bar .tl-read{position:static;align-items:flex-start;gap:calc(9px * var(--dens))}
+.ns-tools .tl-bar .tl-big{font-size:clamp(46px, 17vw, 76px);letter-spacing:-.035em;line-height:.9}
+.ns-tools .tl-bar .tl-sub{text-align:left;max-width:100%}
+.ns-tools .tl-bar .tl-rule{height:3px;background:var(--s2);margin-top:calc(16px * var(--dens));
+  border-radius:var(--r1);overflow:hidden}
+.ns-tools .tl-bar .tl-rule i{display:block;height:100%;background:var(--tl-c);
+  width:calc(var(--tl-frac, 0) * 100%);transition:width .24s linear}
+
+/* ── stack: a column of blocks ───────────────────────────────────────────────
+   The readout as a quantity rather than a number — twelve blocks filling from
+   the bottom, legible across a room. The time sits beside the column, not
+   inside it, so nothing is ever drawn on top of anything.
+
+   Each block is lit by comparing its own index against the fraction, which is
+   why the index is on the element: one variable in, twelve decisions out, and
+   no JavaScript per block. */
+.ns-tools .tl-stack{display:flex;align-items:center;gap:calc(20px * var(--dens));
+  margin:calc(14px * var(--dens)) 0 0}
+.ns-tools .tl-stack .tl-cells{display:flex;flex-direction:column-reverse;gap:4px;
+  flex:0 0 auto;width:52px}
+.ns-tools .tl-stack .tl-cells i{height:14px;border-radius:2px;background:var(--s2);
+  transition:background .2s ease, transform .2s var(--ease-out)}
+/* lit when this block's share of the column is under the fraction */
+.ns-tools .tl-stack .tl-cells i{
+  --lit:clamp(0, calc((var(--tl-frac, 0) - var(--n) / 12) * 1000), 1);
+  background:color-mix(in srgb, var(--tl-c) calc(var(--lit) * 100%), var(--s2));
+  transform:scaleX(calc(.82 + var(--lit) * .18))}
+.ns-tools .tl-stack .tl-read{position:static;align-items:flex-start;flex:1 1 auto;
+  gap:calc(8px * var(--dens))}
+.ns-tools .tl-stack .tl-big{font-size:clamp(34px, 12vw, 52px);letter-spacing:-.03em}
+.ns-tools .tl-stack .tl-sub{text-align:left;max-width:100%}
+
+/* ── plain: no container at all ──────────────────────────────────────────────
+   Type and one moving line. This is the layout for someone who wants the app
+   to get out of the way: no ring, no blocks, no box — the time, the word, and
+   a rule that says how far through it is. */
+.ns-tools .tl-plain{text-align:center;margin:calc(26px * var(--dens)) 0 0}
+.ns-tools .tl-plain .tl-read{position:static;gap:calc(10px * var(--dens))}
+.ns-tools .tl-plain .tl-big{font-size:clamp(56px, 21vw, 96px);letter-spacing:-.04em;line-height:.88}
+.ns-tools .tl-plain .tl-underline{height:1px;background:var(--bd);
+  margin:calc(20px * var(--dens)) auto 0;width:min(230px, 66%);position:relative}
+.ns-tools .tl-plain .tl-underline i{position:absolute;left:0;top:-1px;height:3px;
+  background:var(--tl-c);border-radius:var(--r1);
+  width:calc(var(--tl-frac, 0) * 100%);transition:width .24s linear}
+
+/* the three flat layouts have no disc to swell, so the breath is the type
+   itself — the one thing they all have */
+.ns-tools .tl-bar.breathe .tl-big,
+.ns-tools .tl-stack.breathe .tl-big,
+.ns-tools .tl-plain.breathe .tl-big{
+  transform:scale(calc(.94 + var(--tl-breath, 0) * .12));transition:transform .2s linear}
+
+/* the rounds, as dots
+   A count you read is a count you have to do. Four dots with two filled is a
+   glance; "round 2 of 4" is a sentence. */
+.ns-tools .tl-pips{display:flex;justify-content:center;gap:calc(7px * var(--dens));
+  margin-top:calc(14px * var(--dens))}
+.ns-tools .tl-pips i{width:7px;height:7px;border-radius:50%;background:var(--s3);
+  transition:background .3s ease,transform .3s ease}
+.ns-tools .tl-pips.focus i.on{background:var(--y)}
+.ns-tools .tl-pips.whf i.on{background:#5ad4e6}
+.ns-tools .tl-pips i.on{transform:scale(1.25)}
+
+/* the controls
+   One big round button, because there is one thing you do to an instrument at
+   a time: start it, or move it on. Everything else is a small icon off to the
+   side, where it cannot be pressed by mistake mid-round. */
+.ns-tools .tl-main{display:flex;justify-content:center;margin-top:calc(20px * var(--dens))}
+/* Two of them where the instrument has two things you do to it — the clock and
+   the step. A wider gap than a row of icons gets: both are big targets, and a
+   mis-tap on either costs a measurement. */
+.ns-tools .tl-main.two{gap:calc(22px * var(--dens))}
+/* Square since 4.12. Both dials are custom properties Prefs writes on the root:
+   the size in pixels, the corner as a *share* of that size — so 50% is a circle
+   at any size and the two never have to be set in step with each other. The
+   fallbacks are the shipped defaults, so the button is right before Prefs has
+   applied for the first time. */
+.ns-tools .tl-big-btn{width:var(--tl-btn-size,74px);height:var(--tl-btn-size,74px);
+  border-radius:var(--tl-btn-round,16%);cursor:pointer;
+  background:var(--tl-c);border:var(--bw) solid var(--tl-c);color:var(--on-y);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 10px 26px -12px color-mix(in srgb, var(--tl-c) 70%, transparent);
+  transition:transform .16s var(--ease-out),background .2s ease,color .2s ease,box-shadow .2s ease}
+.ns-tools .tl-big-btn svg{width:30px;height:30px;fill:currentColor;display:block}
+.ns-tools .tl-big-btn:active{transform:scale(.93)}
+/* running: the button empties out, so "it is going" and "press to stop" are
+   the same fact rather than two things to reconcile */
+.ns-tools .tl-big-btn.on{background:none;color:var(--tl-c);box-shadow:none}
+/* the wide one is a word rather than a glyph — "hold now" and "breathe in" are
+   instructions, and an icon for either would be a riddle */
+.ns-tools .tl-big-btn.wide{width:auto;min-width:172px;height:60px;border-radius:var(--r-pill);
+  font:800 12px/1 var(--head);letter-spacing:.14em;text-transform:var(--caps)}
+.ns-tools .tl-big-btn.go{animation:tl-pulse 2.4s ease-in-out infinite}
+@keyframes tl-pulse{
+  0%,100%{box-shadow:0 10px 26px -12px color-mix(in srgb, var(--tl-c) 70%, transparent)}
+  50%{box-shadow:0 10px 34px -8px color-mix(in srgb, var(--tl-c) 92%, transparent)}
+}
+
+.ns-tools .tl-side{display:flex;justify-content:center;gap:calc(26px * var(--dens));
+  margin-top:calc(16px * var(--dens))}
+.ns-tools .tl-icon{background:none;border:none;cursor:pointer;color:var(--mu);
+  display:flex;flex-direction:column;align-items:center;gap:5px;padding:6px 10px;
+  font:400 8.5px/1 var(--mono);letter-spacing:.1em;text-transform:var(--caps);
+  transition:color .15s ease}
+.ns-tools .tl-icon svg{width:19px;height:19px;display:block}
+.ns-tools .tl-icon:active{color:var(--tl-c)}
+
+.ns-tools .tl-tally{text-align:center;margin-top:calc(18px * var(--dens));
+  font:400 10px/1.5 var(--mono);letter-spacing:.05em;color:var(--mu)}
+.ns-tools .tl-tally b{font-family:var(--head);font-weight:800;font-size:13px;color:var(--tl-c)}
+
+/* today's sessions
+   Three numbers and a time, so a row rather than a card. The best hold of the
+   session is the one worth finding again, so it is the one that is coloured. */
+.ns-tools .tl-sess{display:flex;align-items:baseline;gap:calc(12px * var(--dens));
+  padding:calc(10px * var(--dens)) 0;border-top:var(--bw) solid var(--bd);
+  font:400 11px/1 var(--mono);letter-spacing:.04em;font-variant-numeric:tabular-nums}
+.ns-tools .tl-sess:first-of-type{border-top:none}
+.ns-tools .tl-sess .ss-at{flex:0 0 auto;color:var(--mu);min-width:38px}
+.ns-tools .tl-sess .ss-holds{flex:1 1 auto;display:flex;flex-wrap:wrap;gap:calc(9px * var(--dens));
+  color:var(--tx-2)}
+.ns-tools .tl-sess .ss-holds b{font-weight:400}
+.ns-tools .tl-sess .ss-holds b.best{color:#5ad4e6}
+.ns-tools .tl-sess .ss-n{flex:0 0 auto;color:var(--mu)}
+
+@media (hover:hover){
+  .ns-tools .tl-icon:hover{color:var(--tl-c)}
+  .ns-tools .tl-big-btn:hover{filter:brightness(1.06)}
+}
+@media (prefers-reduced-motion:reduce){
+  .ns-tools .tl-big-btn.go{animation:none}
+  .ns-tools .tl-ring.breathe::before{transition:none}
+}
+
+
+/* ── the on-tool dials ───────────────────────────────────────────────────────
+   The rack folds away behind one word. The instrument is the thing on screen;
+   these are what you came back to change once. A value still sitting on its
+   settings default says so, because a dial that never admits it is a dial you
+   cannot get back to. */
+.ns-tools .tl-dials{margin-top:calc(22px * var(--dens));
+  border-top:var(--bw) solid var(--bd);padding-top:calc(6px * var(--dens))}
+.ns-tools .tl-dials-tog{display:flex;align-items:center;justify-content:center;gap:6px;
+  width:100%;background:none;border:none;cursor:pointer;color:var(--mu);
+  padding:calc(9px * var(--dens)) 0;
+  font:400 9px/1 var(--mono);letter-spacing:.16em;text-transform:var(--caps)}
+.ns-tools .tl-dials-tog svg{width:14px;height:14px;transition:transform .22s var(--ease-out)}
+.ns-tools .tl-dials.open .tl-dials-tog{color:var(--tl-c)}
+.ns-tools .tl-dials.open .tl-dials-tog svg{transform:rotate(180deg)}
+.ns-tools .tl-dial-body{padding:calc(4px * var(--dens)) 0 calc(10px * var(--dens))}
+.ns-tools .tl-dial{margin-bottom:calc(14px * var(--dens))}
+.ns-tools .tl-dial-head{display:flex;align-items:baseline;justify-content:space-between;
+  gap:calc(10px * var(--dens));margin-bottom:calc(7px * var(--dens))}
+.ns-tools .tl-dial .dl-lbl{font:400 9px/1 var(--mono);letter-spacing:.14em;
+  text-transform:var(--caps);color:var(--tx-2)}
+.ns-tools .tl-dial .dl-val{font:800 13px/1 var(--head);color:var(--tl-c);
+  font-variant-numeric:tabular-nums;display:flex;align-items:baseline;gap:7px}
+.ns-tools .tl-dial .dl-val.is-def{color:var(--mu)}
+.ns-tools .tl-dial .dl-val em{font:400 8px/1 var(--mono);letter-spacing:.12em;
+  text-transform:var(--caps);color:var(--bd-2);font-style:normal}
+.ns-tools .tl-dial-reset{display:block;margin:calc(4px * var(--dens)) auto 0;background:none;
+  border:none;cursor:pointer;color:var(--mu);padding:6px 10px;
+  font:400 8.5px/1 var(--mono);letter-spacing:.12em;text-transform:var(--caps)}
+.ns-tools .tl-dial-reset:active{color:var(--tl-c)}
+
+/* ── the histories ───────────────────────────────────────────────────────────
+   Lines and nothing else. One row a day: which day, what happened on it, how
+   much. The accent marks the one thing worth *finding* — the best day, the best
+   hold ever posted — and everything else stays grey, because three highlights
+   are no highlight at all. */
+/* Correlations. Two coloured ends and the sentence between them: the row reads
+   left to right as a claim, and the meta line under it says how strong and on
+   how many days — which is the part that stops "r .8" from meaning anything on
+   its own. */
+.ns-tools .tl-corrs{display:flex;flex-direction:column;
+  gap:calc(2px * var(--dens));margin-bottom:calc(14px * var(--dens))}
+.ns-tools .tl-corr{border-top:var(--bw) solid var(--bd);
+  padding:calc(9px * var(--dens)) 0}
+.ns-tools .tl-corr:first-child{border-top:none}
+.ns-tools .tl-corr .cr-pair{display:flex;align-items:baseline;flex-wrap:wrap;
+  gap:calc(6px * var(--dens));font:400 11.5px/1.4 var(--mono);color:var(--tx)}
+.ns-tools .tl-corr .cr-pair b{font-weight:700;color:var(--lc)}
+.ns-tools .tl-corr .cr-pair b.cr-b{color:var(--lc2)}
+.ns-tools .tl-corr .cr-how{color:var(--mu);font-size:10px;letter-spacing:.04em}
+.ns-tools .tl-corr .cr-meta{margin-top:calc(4px * var(--dens));
+  font:400 9px/1 var(--mono);letter-spacing:.08em;color:var(--bd-2);text-transform:var(--caps)}
+
+.ns-tools .tl-row{display:flex;align-items:center;gap:calc(12px * var(--dens));
+  padding:calc(11px * var(--dens)) 0;border-top:var(--bw) solid var(--bd);
+  font:400 10.5px/1 var(--mono);letter-spacing:.04em;font-variant-numeric:tabular-nums}
+.ns-tools .tl-row:first-of-type{border-top:none}
+.ns-tools .tl-row .rw-day{flex:0 0 auto;min-width:66px;color:var(--mu);
+  text-transform:var(--caps);letter-spacing:.1em;font-size:9px}
+.ns-tools .tl-row.good .rw-day{color:var(--tl-c)}
+.ns-tools .tl-row .rw-bars{flex:1 1 auto;display:flex;align-items:flex-end;gap:3px;height:16px}
+.ns-tools .tl-row .rw-bars i{flex:0 0 6px;height:var(--w,40%);min-height:3px;border-radius:1px;
+  background:var(--s3)}
+.ns-tools .tl-row.good .rw-bars i{background:var(--tl-c)}
+.ns-tools .tl-row .rw-holds{flex:1 1 auto;display:flex;flex-wrap:wrap;align-items:baseline;
+  gap:calc(9px * var(--dens));color:var(--tx-2)}
+.ns-tools .tl-row .rw-holds b{font-weight:400}
+.ns-tools .tl-row .rw-holds b.best{color:var(--tl-c)}
+.ns-tools .tl-row .rw-gap{flex:0 0 1px;height:9px;background:var(--bd);align-self:center}
+.ns-tools .tl-row .rw-n{flex:0 0 auto;color:var(--tx);display:flex;align-items:baseline;gap:5px;
+  font-family:var(--head);font-weight:800;font-size:12px}
+.ns-tools .tl-row .rw-n em{font:400 9px/1 var(--mono);color:var(--mu);font-style:normal}
+
+/* ── OPTIMISE ────────────────────────────────────────────────────────────────
+   The shelf is rows, not cards: a list is a name, a best time and a button, and
+   the best time sits *on* the row because it is the reason to press the button.
+   The colour is the list's own, drawn as a stripe down its edge rather than a
+   fill, so a dozen lists are a dozen colours and still one page. */
+.ns-tools .tl-lists{margin-top:calc(4px * var(--dens))}
+.ns-tools .tl-list{display:flex;align-items:center;gap:calc(13px * var(--dens));
+  padding:calc(13px * var(--dens));
+  border:var(--bw) solid var(--bd);border-left:3px solid var(--lc);border-radius:var(--r2);
+  background:var(--s1);margin-bottom:calc(9px * var(--dens))}
+/* a gradient list fades its own colour into the card along the row */
+.ns-tools .tl-list.grad{border-left-color:transparent;
+  background:linear-gradient(90deg, color-mix(in srgb, var(--lc) 22%, var(--s1)) 0%, var(--s1) 46%)}
+.ns-tools .tl-list-ic{flex:0 0 auto;color:var(--lc);display:flex}
+.ns-tools .tl-list-ic svg{width:21px;height:21px;display:block}
+.ns-tools .tl-list-nm{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:5px}
+/* The name is the thing you are looking for on this row, so it is the one set
+   in the title face — the times under it are read second and read in the mono. */
+.ns-tools .tl-list-nm b{font:800 15px/1.15 var(--head);letter-spacing:-.01em;color:var(--tx);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ns-tools .tl-list-nm em{font:400 9px/1 var(--mono);letter-spacing:.06em;color:var(--mu);
+  font-style:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ns-tools .tl-go{flex:0 0 auto;cursor:pointer;background:var(--lc);color:var(--on-y);
+  border:var(--bw) solid var(--lc);border-radius:var(--r-pill);
+  padding:calc(9px * var(--dens)) calc(16px * var(--dens));
+  font:800 10px/1 var(--head);letter-spacing:.16em;text-transform:var(--caps);
+  transition:transform .14s var(--ease-out)}
+.ns-tools .tl-go:active{transform:scale(.94)}
+
+/* the run's header: where you are, and the one way back out of it */
+.ns-tools .tl-runhead{display:flex;align-items:center;gap:calc(10px * var(--dens));
+  margin:0 0 calc(6px * var(--dens))}
+.ns-tools .tl-runhead > span{display:flex;align-items:center;gap:8px;min-width:0;color:var(--lc,var(--y))}
+.ns-tools .tl-runhead svg{width:18px;height:18px;flex:0 0 auto}
+.ns-tools .tl-runhead b{font:800 14px/1 var(--head);letter-spacing:.02em;color:var(--tx);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ns-tools .tl-back{flex:0 0 auto;background:none;border:none;cursor:pointer;color:var(--mu);
+  display:flex;padding:4px}
+.ns-tools .tl-back svg{width:20px;height:20px}
+.ns-tools .opt{--tl-c:var(--lc, var(--y))}
+
+/* the splits, as they land. Gold is a split faster than the best that list has
+   ever posted for that step — shiny, because a record should look like one and
+   a colour alone would only look like another state. */
+.ns-tools .tl-splits{margin-top:calc(20px * var(--dens))}
+.ns-tools .tl-split{display:flex;align-items:baseline;gap:calc(10px * var(--dens));
+  padding:calc(10px * var(--dens)) 0;border-top:var(--bw) solid var(--bd);
+  font:400 11px/1 var(--mono);letter-spacing:.04em;font-variant-numeric:tabular-nums}
+.ns-tools .tl-split:first-child{border-top:none}
+.ns-tools .tl-split .sp-n{flex:0 0 18px;color:var(--bd-2);font-size:9px}
+.ns-tools .tl-split .sp-nm{flex:1 1 auto;min-width:0;color:var(--tx-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ns-tools .tl-split .sp-t{flex:0 0 auto;color:var(--tx);font-family:var(--head);
+  font-weight:800;font-size:14px}
+.ns-tools .tl-split .sp-d{flex:0 0 auto;min-width:52px;text-align:right;color:var(--mu);font-size:9px}
+.ns-tools .tl-split.gold{
+  background:linear-gradient(90deg, transparent, color-mix(in srgb, #e9c46a 15%, transparent) 60%, transparent)}
+.ns-tools .tl-split.gold .sp-t,
+.ns-tools .tl-split.gold .sp-d{
+  background:linear-gradient(96deg,#f4d98a 0%,#e9b949 42%,#fff3c4 58%,#d9a53c 100%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  text-shadow:0 0 12px color-mix(in srgb,#e9c46a 40%,transparent)}
+.ns-tools .tl-split.gold .sp-nm{color:var(--tx)}
+
+/* the history's filters */
+.ns-tools .tl-chips{display:flex;flex-wrap:wrap;gap:calc(7px * var(--dens));
+  margin:calc(10px * var(--dens)) 0 calc(14px * var(--dens))}
+.ns-tools .tl-chips.soft{margin-top:calc(-6px * var(--dens))}
+.ns-tools .tl-chip{cursor:pointer;background:var(--s1);border:var(--bw) solid var(--bd);
+  border-radius:var(--r-pill);color:var(--mu);
+  padding:calc(7px * var(--dens)) calc(13px * var(--dens));
+  font:400 9px/1 var(--mono);letter-spacing:.12em;text-transform:var(--caps);
+  transition:color .18s,border-color .18s,background .18s}
+.ns-tools .tl-chip.on{background:var(--y-8);border-color:var(--y);color:var(--tx)}
+.ns-tools .tl-chip.sm{padding:calc(6px * var(--dens)) calc(11px * var(--dens));font-size:8.5px}
+.ns-tools .tl-chip.sm.on{background:color-mix(in srgb, var(--lc) 16%, transparent);
+  border-color:var(--lc);color:var(--tx)}
+
+.ns-tools .tl-hist{margin-top:calc(2px * var(--dens))}
+.ns-tools .tl-hrow{display:flex;align-items:center;gap:calc(12px * var(--dens));
+  padding:calc(11px * var(--dens)) 0;border-top:var(--bw) solid var(--bd)}
+.ns-tools .tl-hrow:first-child{border-top:none}
+.ns-tools .tl-hrow .hr-ic{flex:0 0 auto;color:var(--lc);display:flex}
+.ns-tools .tl-hrow .hr-ic svg{width:17px;height:17px;display:block}
+.ns-tools .tl-hrow .hr-nm{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:4px}
+.ns-tools .tl-hrow .hr-nm b{font:700 12.5px/1.15 var(--head);color:var(--tx);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ns-tools .tl-hrow .hr-nm em{font:400 8.5px/1 var(--mono);letter-spacing:.08em;
+  text-transform:var(--caps);color:var(--mu);font-style:normal}
+.ns-tools .tl-hrow .hr-t{flex:0 0 auto;text-align:right;font:800 15px/1 var(--head);
+  color:var(--tx);font-variant-numeric:tabular-nums;display:flex;flex-direction:column;
+  align-items:flex-end;gap:4px}
+.ns-tools .tl-hrow .hr-t i{font:400 7.5px/1 var(--mono);letter-spacing:.14em;
+  text-transform:var(--caps);font-style:normal;color:#e9b949}
+.ns-tools .tl-hrow.gold .hr-t{
+  background:linear-gradient(96deg,#f4d98a 0%,#e9b949 42%,#fff3c4 58%,#d9a53c 100%);
+  -webkit-background-clip:text;background-clip:text;color:transparent}
+.ns-tools .tl-hrow.gold .hr-t i{-webkit-text-fill-color:#e9b949}
+
+.ns-tools .tl-empty{text-align:center;padding:calc(34px * var(--dens)) calc(12px * var(--dens))}
+.ns-tools .tl-empty p{margin:0 0 calc(9px * var(--dens));font:700 15px/1.3 var(--head);color:var(--tx)}
+.ns-tools .tl-empty p.sm{font:400 11px/1.65 var(--mono);letter-spacing:.02em;color:var(--mu);
+  max-width:34ch;margin-inline:auto}
+
+/* ── DATA ────────────────────────────────────────────────────────────────────
+   Inline SVG against the same tokens as everything else — no library and no
+   canvas. The charts are small, the data is at most a year of days, and an SVG
+   follows the density dial for free. */
+.ns-tools .tl-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));
+  gap:calc(9px * var(--dens));margin-bottom:calc(4px * var(--dens))}
+.ns-tools .tl-tile{border:var(--bw) solid var(--bd);border-radius:var(--r2);background:var(--s1);
+  border-top:2px solid var(--lc);padding:calc(12px * var(--dens));
+  display:flex;flex-direction:column;gap:5px}
+.ns-tools .tl-tile b{font:800 clamp(22px,7vw,30px)/1 var(--head);letter-spacing:-.03em;
+  color:var(--tx);font-variant-numeric:tabular-nums}
+.ns-tools .tl-tile span{font:400 8.5px/1 var(--mono);letter-spacing:.12em;
+  text-transform:var(--caps);color:var(--lc)}
+.ns-tools .tl-tile em{font:400 9px/1 var(--mono);letter-spacing:.04em;color:var(--mu);font-style:normal}
+
+.ns-tools .tl-chart{margin-bottom:calc(6px * var(--dens))}
+.ns-tools .tl-chart svg{width:100%;height:96px;display:block}
+.ns-tools .tl-chart rect{transition:height .4s var(--ease-out),y .4s var(--ease-out)}
+.ns-tools .tl-axis{display:flex;justify-content:space-between;margin-top:calc(7px * var(--dens));
+  font:400 8.5px/1 var(--mono);letter-spacing:.1em;text-transform:var(--caps);color:var(--mu)}
+
+.ns-tools .tl-pie{display:flex;align-items:center;gap:calc(20px * var(--dens));flex-wrap:wrap}
+.ns-tools .tl-pie svg{width:112px;height:112px;flex:0 0 auto}
+.ns-tools .tl-pie path{transition:opacity .3s ease}
+.ns-tools .tl-key{flex:1 1 120px;display:flex;flex-direction:column;gap:calc(9px * var(--dens))}
+.ns-tools .tl-key span{display:flex;align-items:center;gap:8px;
+  font:400 10px/1 var(--mono);letter-spacing:.06em;color:var(--tx-2)}
+.ns-tools .tl-key i{width:9px;height:9px;border-radius:2px;background:var(--lc);flex:0 0 auto}
+.ns-tools .tl-key b{margin-left:auto;font-family:var(--head);font-weight:800;font-size:13px;color:var(--tx)}
+
+.ns-tools .tl-rose{display:flex;justify-content:center}
+.ns-tools .tl-rose svg{width:min(210px,66vw);height:auto}
+.ns-tools .tl-rose path{transition:opacity .35s ease}
+.ns-tools .tl-rose text{font:400 7px/1 var(--mono);letter-spacing:.1em;fill:var(--mu);
+  text-transform:var(--caps)}
+
+.ns-tools .tl-strip{display:flex;gap:3px;flex-wrap:wrap}
+.ns-tools .tl-strip i{flex:1 1 6px;max-width:14px;height:22px;border-radius:2px;background:var(--s2)}
+.ns-tools .tl-strip i.on{background:var(--y)}
+
+/* ── the strip editor, in settings ───────────────────────────────────────────
+   The app list in appearance → layout, one level down: a row per instrument, a
+   switch and two arrows. A tool switched off keeps its place in the order for
+   when it comes back on, which is why nothing is ever removed from this list. */
+.ns-tools .tl-strip-row{display:flex;align-items:center;gap:calc(11px * var(--dens));
+  padding:calc(10px * var(--dens)) 0;border-top:var(--bw) solid var(--bd)}
+.ns-tools .tl-strip-row:first-child{border-top:none}
+.ns-tools .tl-strip-row.off{opacity:.5}
+.ns-tools .tl-strip-row .ts-ic{flex:0 0 auto;color:var(--y);display:flex}
+.ns-tools .tl-strip-row .ts-ic svg{width:18px;height:18px;display:block}
+.ns-tools .tl-strip-row .ts-nm{flex:1 1 auto;font:700 12px/1 var(--head);letter-spacing:.02em;
+  color:var(--tx);text-transform:var(--caps)}
+.ns-tools .tl-strip-row .ts-mv{flex:0 0 auto;display:flex;gap:2px}
+.ns-tools .tl-strip-row .ts-arw{background:none;border:var(--bw) solid var(--bd);cursor:pointer;
+  color:var(--mu);border-radius:var(--r1);padding:4px;display:flex}
+.ns-tools .tl-strip-row .ts-arw svg{width:15px;height:15px}
+.ns-tools .tl-strip-row .ts-arw:disabled{opacity:.3;cursor:default}
+
+/* ── the optimise list editor, in settings ───────────────────────────────────
+   A card per list: its name, its colour, its icon and its steps. The steps are
+   a textarea, one per line, for the same reason every other list in Config is —
+   a row of inputs for something you reorder by retyping is a worse textarea. */
+.ns-tools .tl-ed-icons{display:flex;flex-wrap:wrap;gap:calc(6px * var(--dens))}
+.ns-tools .tl-ed-icons button{width:34px;height:34px;cursor:pointer;display:flex;
+  align-items:center;justify-content:center;color:var(--mu);
+  background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1)}
+.ns-tools .tl-ed-icons button svg{width:17px;height:17px}
+.ns-tools .tl-ed-icons button.on{color:var(--tx);border-color:var(--y);background:var(--y-8)}
+.ns-tools .tl-ed-swatches{display:flex;flex-wrap:wrap;gap:calc(6px * var(--dens))}
+.ns-tools .tl-ed-swatches button{width:26px;height:26px;cursor:pointer;border-radius:var(--r1);
+  border:2px solid transparent;background:var(--sw)}
+.ns-tools .tl-ed-swatches button.on{border-color:var(--tx)}
+
+@media (hover:hover){
+  .ns-tools .tl-chip:hover{color:var(--tx)}
+  .ns-tools .tl-go:hover{filter:brightness(1.07)}
+  .ns-tools .tl-strip-row .ts-arw:not(:disabled):hover{color:var(--tx);border-color:var(--bd-2)}
+}
+@media (prefers-reduced-motion:reduce){
+  .ns-tools .tl-chart rect,.ns-tools .tl-pie path,.ns-tools .tl-rose path{transition:none}
+}

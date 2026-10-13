@@ -1,0 +1,411 @@
+/* PLAN project grid, task queue and export panels. */
+
+.ns-plan .scr{display:none;min-height:100%;padding-bottom:var(--scr-pad-b)}
+.ns-plan .scr.on{display:block}
+.ns-plan .hd{position:sticky;top:0;background:var(--bg);border-bottom:var(--bw) solid var(--bd);
+    padding:calc(var(--hd-pad) + var(--sat)) 18px var(--hd-pad);
+    display:flex;align-items:center;gap:calc(14px * var(--dens));z-index:10}
+.ns-plan .hd-back{background:none;border:none;color:var(--y);font:400 12px/1 var(--mono);cursor:pointer;letter-spacing:.06em;padding:calc(4px * var(--dens)) 0}
+.ns-plan .hd-title{font:800 var(--hd-title-px)/1 var(--head);letter-spacing:.1em;text-transform:var(--caps);text-shadow:var(--title-sh-x) 0 0 var(--title-sh-c);flex:1}
+.ns-plan .hd-action{background:none;border:none;color:var(--mu);font:400 11px/1 var(--mono);cursor:pointer;letter-spacing:.06em;padding:calc(4px * var(--dens)) 0;transition:color .12s}
+.ns-plan .hd-action:active{color:var(--y)}
+
+/* Home header ── (the band's box is shell.css's, shared by every app) */
+.ns-plan .h-label{font:700 10px/1 var(--head);letter-spacing:.16em;text-transform:var(--caps);color:var(--tx-2)}
+.ns-plan .h-logo{font-weight:800;font-family:var(--head);letter-spacing:-.02em}
+.ns-plan .h-logo em{font-style:normal}
+
+/* Content ── */
+.ns-plan .cnt{padding:calc(18px * var(--dens))}
+.ns-plan .f{margin-bottom:17px}
+.ns-plan .lbl{display:block;font:400 9px/1 var(--mono);letter-spacing:.14em;text-transform:var(--caps);color:var(--mu);margin-bottom:7px}
+.ns-plan input[type=text],.ns-plan input[type=password],.ns-plan textarea{
+  width:100%;background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+  color:var(--tx);font:400 15px/1 var(--mono);padding:calc(12px * var(--dens)) calc(13px * var(--dens));outline:none;
+  -webkit-appearance:none;transition:border-color .12s}
+.ns-plan input:focus,.ns-plan textarea:focus{border-color:var(--y)}
+.ns-plan textarea{resize:none;line-height:1.65;min-height:72px}
+
+/* Row label used on the home screen ── */
+.ns-plan .row-lbl{display:flex;align-items:center;justify-content:space-between;gap:calc(10px * var(--dens));
+  font:700 10px/1 var(--head);letter-spacing:.15em;text-transform:var(--caps);color:var(--y);
+  padding-bottom:calc(8px * var(--dens));margin:0 0 12px;border-bottom:var(--bw) solid var(--bd)}
+.ns-plan .row-lbl .muted-act{background:none;border:none;color:var(--mu);font:400 9px/1 var(--mono);
+  letter-spacing:.08em;cursor:pointer;padding:calc(2px * var(--dens)) 0;text-transform:var(--caps)}
+.ns-plan .row-lbl .muted-act:active{color:var(--re)}
+.ns-plan .row-lbl em{color:var(--mu);font-style:normal;font:400 10px/1 var(--mono);
+  letter-spacing:.06em;text-transform:none}
+/* saving a preset is not a clear: the shared act turns red on tap, this one
+   does not */
+.ns-plan #queue-save:active{color:var(--y)}
+
+/* Queue presets ──
+   A saved queue, refilled with one tap. A wrapping row, never a strip: the
+   list is built from Config and has no width it can be relied on to fit. */
+.ns-plan .presets{display:flex;flex-wrap:wrap;gap:calc(6px * var(--dens));margin-bottom:calc(12px * var(--dens))}
+.ns-plan .pre-chip{display:inline-flex;align-items:stretch;
+  background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r-pill);overflow:hidden}
+.ns-plan .pre-b{display:inline-flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;
+  color:var(--tx);font:400 10px/1 var(--mono);letter-spacing:.06em;
+  padding:calc(8px * var(--dens)) calc(6px * var(--dens)) calc(8px * var(--dens)) calc(12px * var(--dens))}
+.ns-plan .pre-b em{font-style:normal;color:var(--mu);font-size:9px}
+.ns-plan .pre-b:active{color:var(--y)}
+.ns-plan .pre-x{background:none;border:none;cursor:pointer;color:var(--mu);font:400 10px/1 var(--mono);
+  padding:0 calc(10px * var(--dens)) 0 calc(4px * var(--dens))}
+.ns-plan .pre-x:active{color:var(--re)}
+
+/* Clipped text needs line-height above 1 to preserve descenders. Row height
+   still comes from min-height and padding. */
+
+/* Project tiles ── */
+.ns-plan .projects{padding:0 calc(18px * var(--dens));margin-bottom:26px}
+/* One tile is the unit the expanded states are measured in. The tile is a
+   single row now — half the height it used to be — so the open project and a
+   section row are one tile each and the form is eight, which is the same
+   absolute height those three had before the tile was halved. */
+.ns-plan .proj-grid{display:grid;grid-template-columns:1fr 1fr;
+  --tile-h:46px;--tile-gap:calc(8px * var(--dens));gap:var(--tile-gap)}
+/* Filled exactly like DO's block tiles: a 10% wash of the label's colour with
+   the colour itself on the border. Queued lifts the wash. */
+.ns-plan .proj-tile{border-radius:var(--r2);
+  background:color-mix(in srgb,var(--proj-color,var(--bd)) 10%,var(--s1));
+  border:var(--bw) solid var(--proj-color,var(--bd));
+  padding:calc(8px * var(--dens)) calc(14px * var(--dens));cursor:pointer;text-align:left;user-select:none;
+  display:flex;flex-direction:row;align-items:center;justify-content:space-between;
+  gap:calc(10px * var(--dens));min-height:var(--tile-h);
+  /* the CSS transition has to be at least as quick as the FLIP's own border
+     fade (plan.js, ~22% of the move) or it becomes the slow one */
+  transition:border-color .12s,background .12s}
+.ns-plan .proj-tile:active{background:color-mix(in srgb,var(--proj-color,var(--bd)) 20%,var(--s1))}
+.ns-plan .proj-tile.has{background:color-mix(in srgb,var(--proj-color,var(--bd)) 22%,var(--s1))}
+.ns-plan .proj-head{display:flex;align-items:center;gap:calc(9px * var(--dens));min-width:0}
+.ns-plan .proj-dot{width:9px;height:9px;border-radius:50%;background:var(--proj-color,var(--mu));flex-shrink:0}
+.ns-plan .proj-name{font:700 13px/1.35 var(--head);letter-spacing:.08em;text-transform:var(--caps);color:var(--tx);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the "n sections" line reads in the tile's own colour, like its outline. It
+   sits at the right end of the row rather than under the name — the tile is
+   one row tall now, so there is no "under". */
+.ns-plan .proj-meta{font:400 9px/1.4 var(--mono);color:var(--proj-color,var(--mu));letter-spacing:.05em;
+  flex:0 0 auto;text-align:right;white-space:nowrap}
+.ns-plan .proj-meta em{color:var(--proj-color);font-style:normal}
+/* a project with nothing mapped says so here rather than failing at send time */
+.ns-plan .proj-meta .unmapped{color:var(--or)}
+
+/* A project open in place (no sheet) ──
+   Once open, the tile stops being a box: no wash, no border, just the name
+   where an unopened tile has it — top left, the colour dot to its left — at
+   half a tile's height, so it reads as the heading over the rows rather than
+   a banner competing with them. The horizontal padding stays, so the name
+   lines up with the section rows' own text. Under it sits one row per
+   section, two tiles wide and about half a tile tall. */
+.ns-plan .proj-tile.open{grid-column:1 / -1;min-height:var(--tile-h);
+  background:none;border-color:transparent;justify-content:flex-start;
+  padding-top:0;padding-bottom:0}
+/* both of these would otherwise paint the box back in: they are more
+   specific than .open, or as specific and declared earlier */
+.ns-plan .proj-tile.open:active,.ns-plan .proj-tile.open.has{background:none}
+.ns-plan .proj-tile.open .proj-head{width:100%}
+.ns-plan .proj-tile.open .proj-dot{width:11px;height:11px}
+.ns-plan .proj-tile.open .proj-name{min-width:0;overflow:hidden;white-space:nowrap;
+  font-size:24px;line-height:1.3;letter-spacing:.03em}
+/* "n sections" is what the rows below now say */
+.ns-plan .proj-tile.open .proj-meta{display:none}
+/* Keep the colour rule as a real child of the tile so flip() can animate
+   its delayed reveal. Absolute positioning spans the tile without affecting flex layout. */
+.ns-plan .proj-tile.open{position:relative}
+.ns-plan .proj-tile.open .proj-head{padding-bottom:calc(9px * var(--dens))}
+.ns-plan .ph-rule{position:absolute;left:0;right:0;bottom:0;height:2px;
+  border-radius:var(--r1);background:var(--proj-color);opacity:.85}
+/* the form open under it: the same heading, unchanged — .wide is kept as the
+   state marker (aria and the harness read it) but no longer grows the box */
+
+/* Project-switch chips stay visible while a project is open, allowing direct
+   navigation without returning to the grid. */
+.ns-plan .proj-jumps{grid-column:1 / -1;display:flex;gap:calc(6px * var(--dens));
+  overflow-x:auto;overflow-y:hidden;scrollbar-width:none;touch-action:pan-x pan-y;
+  padding-bottom:2px;margin-bottom:calc(2px * var(--dens))}
+.ns-plan .proj-jumps::-webkit-scrollbar{display:none}
+.ns-plan .proj-jump{flex:0 0 auto;display:flex;align-items:center;gap:calc(7px * var(--dens));
+  background:none;border:var(--bw) solid var(--bd);border-radius:var(--r-pill);
+  color:var(--mu);font:700 10px/1 var(--head);letter-spacing:.08em;text-transform:var(--caps);
+  padding:calc(7px * var(--dens)) calc(11px * var(--dens));cursor:pointer;user-select:none;
+  transition:color .12s,border-color .12s,background .12s}
+.ns-plan .proj-jump .proj-dot{width:7px;height:7px}
+.ns-plan .proj-jump em{font:400 9px/1 var(--mono);letter-spacing:.04em;font-style:normal;
+  color:var(--proj-color);text-transform:none;font-variant-numeric:tabular-nums}
+/* one with something queued in it is already carrying its colour — that is
+   what makes "where did I put the other three" answerable at a glance */
+.ns-plan .proj-jump.has{color:var(--tx);border-color:var(--proj-color)}
+.ns-plan .proj-jump:active{background:color-mix(in srgb,var(--proj-color) 16%,var(--s1));
+  border-color:var(--proj-color);color:var(--tx)}
+
+/* A section row ──
+   The wash-and-outline box it used to be made three rows read as three
+   identical slabs of the project's colour, and the name — the only thing that
+   differs between them — was competing with all of it. The colour is a rail
+   down the left edge instead (CAL's device, and the media rows'), the surface
+   is the app's ordinary one, and the name is the loudest thing in the row
+   because the name is what you are choosing between.
+
+   `has` is the count of what is already queued into that section. */
+.ns-plan .proj-sec{grid-column:1 / -1;min-height:var(--tile-h);
+  display:flex;align-items:stretch;gap:calc(11px * var(--dens));
+  background:var(--s1);
+  border:var(--bw) solid var(--bd);border-radius:var(--r2);
+  color:var(--tx);font:400 12px/1.4 var(--mono);letter-spacing:.05em;text-align:left;
+  padding:calc(9px * var(--dens)) calc(13px * var(--dens));cursor:pointer;user-select:none;
+  transition:background .12s,border-color .12s}
+.ns-plan .ps-rail{flex:0 0 3px;border-radius:var(--r1);background:var(--proj-color)}
+.ns-plan .ps-name{flex:1 1 auto;min-width:0;align-self:center;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ns-plan .ps-n{flex:0 0 auto;align-self:center;font:400 9.5px/1.4 var(--mono);font-style:normal;
+  letter-spacing:.04em;color:var(--proj-color);font-variant-numeric:tabular-nums}
+.ns-plan .proj-sec i{flex:0 0 auto;align-self:center;font-style:normal;color:var(--proj-color)}
+.ns-plan .proj-sec.has{border-color:color-mix(in srgb,var(--proj-color) 55%,var(--bd))}
+.ns-plan .proj-sec:active{background:color-mix(in srgb,var(--proj-color) 14%,var(--s1));
+  border-color:var(--proj-color)}
+
+/* The task form, in the grid ──
+   Two tiles wide and four tall, morphing out of the section row that was
+   tapped. Which rows it carries is Config (plan.formFields). */
+.ns-plan .proj-form{grid-column:1 / -1;
+  min-height:calc(var(--tile-h) * 8 + var(--tile-gap) * 3);
+  background:color-mix(in srgb,var(--proj-color) 7%,var(--s1));
+  border:var(--bw) solid var(--proj-color);border-radius:var(--r2);
+  padding:calc(14px * var(--dens));display:flex;flex-direction:column}
+.ns-plan .proj-form .f{margin-bottom:calc(13px * var(--dens))}
+.ns-plan .proj-form .btn{margin-top:auto}
+.ns-plan .pf-head{display:flex;align-items:center;justify-content:space-between;gap:calc(10px * var(--dens));
+  padding-bottom:calc(10px * var(--dens));margin-bottom:calc(13px * var(--dens));
+  border-bottom:var(--bw) solid color-mix(in srgb,var(--proj-color) 40%,transparent)}
+.ns-plan .pf-sec{font:700 11px/1 var(--head);letter-spacing:.12em;text-transform:var(--caps);color:var(--proj-color)}
+.ns-plan .pf-close{background:none;border:none;color:var(--mu);font:400 10px/1 var(--mono);
+  letter-spacing:.08em;cursor:pointer;padding:calc(2px * var(--dens)) 0;text-transform:var(--caps)}
+.ns-plan .pf-close:active{color:var(--y)}
+
+/* The export panel ──
+   The same box as the task form and drawn in the same place, but it belongs
+   to the sent list rather than to a project, so it wears the accent instead
+   of a project's colour. Everything in it is built from Config — the slot
+   chips from the templates, the preview from a template and the calendar map
+   — so nothing here has a fixed width: the chips wrap and the preview's
+   columns shrink. */
+.ns-plan .exp-panel{--proj-color:var(--y);min-height:0}
+.ns-plan .exp-pair{display:grid;grid-template-columns:1fr 1fr;gap:calc(9px * var(--dens))}
+.ns-plan .exp-panel input[type=date],.ns-plan .exp-panel input[type=time]{
+  width:100%;background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+  color:var(--tx);font:400 13px/1 var(--mono);padding:calc(11px * var(--dens)) calc(12px * var(--dens));
+  outline:none;-webkit-appearance:none;min-width:0}
+.ns-plan .exp-panel input[type=date]:focus,.ns-plan .exp-panel input[type=time]:focus{border-color:var(--y)}
+.ns-plan .exp-panel textarea{min-height:60px;font-size:13px}
+
+/* one row per picked task: its name, then the slots it can be given */
+.ns-plan .exp-tasks{display:flex;flex-direction:column;gap:calc(7px * var(--dens))}
+.ns-plan .exp-task{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r2);
+  padding:calc(10px * var(--dens)) calc(11px * var(--dens));display:flex;flex-direction:column;
+  gap:calc(8px * var(--dens));transition:border-color var(--dur-1),background var(--dur-1)}
+.ns-plan .exp-task.on{background:color-mix(in srgb,var(--q-color,var(--y)) 12%,var(--s1));
+  border-color:var(--q-color,var(--y))}
+.ns-plan .exp-task-name{display:flex;align-items:center;gap:calc(8px * var(--dens));
+  font:400 12px/1.35 var(--mono);color:var(--tx);word-break:break-word}
+.ns-plan .exp-task-name .q-dot{margin-top:0;flex-shrink:0}
+/* a task holding more than one hour says how many, so a two-slot job is not
+   mistaken for a mis-tap */
+.ns-plan .exp-span{margin-left:auto;flex-shrink:0;font-style:normal;
+  font:400 8.5px/1 var(--mono);letter-spacing:1px;text-transform:var(--caps);
+  color:var(--q-color,var(--y))}
+/* built from the templates, so it wraps rather than running off the edge */
+.ns-plan .exp-slots{display:flex;flex-wrap:wrap;gap:calc(5px * var(--dens))}
+.ns-plan .exp-slot{background:var(--s2);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+  color:var(--mu);font:400 11px/1 var(--mono);letter-spacing:.05em;
+  padding:calc(8px * var(--dens)) calc(10px * var(--dens));cursor:pointer;transition:all .1s}
+.ns-plan .exp-slot.on{background:var(--yd);border-color:var(--y);color:var(--y)}
+/* a slot the picked template does not have: dimmed, but still tappable — the
+   tap is what explains why it cannot be used */
+.ns-plan .exp-slot.off{opacity:.4;border-style:dashed}
+
+/* The preview ── */
+.ns-plan .exp-warn{background:rgba(255,154,20,.1);border:var(--bw) solid rgba(255,154,20,.32);
+  border-radius:var(--r1);color:#ff9a14;font:400 10px/1.6 var(--mono);letter-spacing:.03em;
+  padding:calc(9px * var(--dens)) calc(11px * var(--dens));margin-bottom:calc(8px * var(--dens))}
+.ns-plan .exp-warn b{font-weight:700}
+.ns-plan .exp-empty,.ns-plan .exp-need{font:400 10px/1.6 var(--mono);color:var(--mu);
+  letter-spacing:.05em;text-align:center;padding:calc(10px * var(--dens)) 0}
+.ns-plan .exp-need{color:var(--or);margin-top:auto}
+.ns-plan .exp-prev{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+  padding:calc(9px * var(--dens)) calc(11px * var(--dens));max-height:260px;overflow-y:auto}
+.ns-plan .exp-line{display:grid;grid-template-columns:auto 1fr auto;gap:calc(9px * var(--dens));
+  align-items:baseline;font:400 10px/1.8 var(--mono);letter-spacing:.03em}
+.ns-plan .exp-line.idle{opacity:.45}
+.ns-plan .exp-at{color:var(--y);white-space:nowrap}
+.ns-plan .exp-ev{color:var(--tx);min-width:0;word-break:break-word}
+.ns-plan .exp-cal{color:var(--mu);min-width:0;text-align:right;word-break:break-word}
+.ns-plan .exp-cal.missing{color:var(--re)}
+
+/* Options (scale buttons) ── */
+.ns-plan .opts{display:flex;flex-wrap:wrap;gap:calc(5px * var(--dens))}
+.ns-plan .opt-b{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+       color:var(--mu);font:400 12px/1 var(--mono);letter-spacing:.05em;
+       padding:calc(11px * var(--dens)) calc(12px * var(--dens));cursor:pointer;transition:all .1s;flex:1;text-align:center;min-width:0;white-space:nowrap}
+.ns-plan .opt-b.on{background:var(--yd);border-color:var(--y);color:var(--y)}
+/* a block chip in its Todoist label's colour (--c set by PLAN when known) */
+.ns-plan .opt-b.lbl{background:color-mix(in srgb,var(--c) 10%,var(--s1));border-color:var(--c);color:var(--c)}
+.ns-plan .opt-b.lbl.on{background:color-mix(in srgb,var(--c) 30%,var(--s1));box-shadow:0 0 0 1px var(--c)}
+.ns-plan .opt-b.none-opt{flex:0 0 auto}
+
+/* Priority buttons ── */
+.ns-plan .prio-row{display:grid;grid-template-columns:repeat(3,1fr);gap:calc(5px * var(--dens))}
+.ns-plan .prio-b{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+        color:var(--mu);font:400 11px/1 var(--mono);letter-spacing:.05em;
+        padding:calc(12px * var(--dens)) calc(6px * var(--dens));cursor:pointer;text-align:center;transition:all .1s}
+.ns-plan .prio-b.on.p1{background:rgba(224,96,96,.12);border-color:var(--re);color:var(--re)}
+.ns-plan .prio-b.on.p2{background:rgba(255,154,20,.12);border-color:#ff9a14;color:#ff9a14}
+.ns-plan .prio-b.on.p3{background:rgba(92,219,125,.12);border-color:var(--gr);color:var(--gr)}
+.ns-plan .prio-label{font:400 7px/1 var(--mono);letter-spacing:.1em;text-transform:var(--caps);margin-top:4px;opacity:.7}
+
+/* Date stepper (task form) ──
+   ← tomorrow → : the shape LOG's date header already has, because a day is
+   nearly always today or the next one and a native picker is a keyboard for
+   something a nudge should do. The middle is the way back to today, and wears
+   the accent while it is on any other day, the way a picked chip does. */
+.ns-plan .dstep{display:grid;grid-template-columns:auto 1fr auto;gap:calc(5px * var(--dens))}
+/* The day stepper in the task sheet is the same control LOG's date arrows are,
+   so it wears the same treatment: the display face at the title's weight, in
+   title ink, with the title's hard offset copy behind it. Composed at the
+   point of use — see the note in log.css and ROOT.md §6. */
+.ns-plan .dstep-a{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+       color:var(--tx);font:800 14px/1 var(--head);
+       text-shadow:var(--title-sh-x) 0 0 var(--title-sh-c);
+       padding:calc(12px * var(--dens)) calc(16px * var(--dens));cursor:pointer;transition:all .1s}
+.ns-plan .dstep-a:active{border-color:var(--y);color:var(--y)}
+.ns-plan .dstep-a:disabled{opacity:.32;cursor:default}
+.ns-plan .dstep-a:disabled:active{border-color:var(--bd);color:var(--tx)}
+.ns-plan .dstep-v{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+       color:var(--tx);padding:calc(9px * var(--dens)) calc(10px * var(--dens));
+       cursor:pointer;text-align:center;transition:all .1s;min-width:0;overflow:hidden}
+.ns-plan .dstep-v.on{background:var(--yd);border-color:var(--y);color:var(--y)}
+.ns-plan .dstep-w{display:block;font:400 13px/1.35 var(--mono);letter-spacing:.05em;
+       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ns-plan .dstep-d{display:block;font:400 8px/1.4 var(--mono);letter-spacing:.1em;text-transform:var(--caps);
+       color:var(--mu);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ns-plan .dstep-v.on .dstep-d{color:inherit;opacity:.72}
+
+/* Toggle (subtasks) ── */
+.ns-plan .tg2{display:grid;grid-template-columns:1fr 1fr;gap:calc(5px * var(--dens))}
+.ns-plan .tg2-b{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+       color:var(--mu);font:400 12px/1 var(--mono);letter-spacing:.08em;
+       padding:calc(12px * var(--dens));cursor:pointer;text-align:center;transition:all .1s}
+.ns-plan .tg2-b.on{background:var(--yd);border-color:var(--y);color:var(--y)}
+
+/* Subtask input ── */
+.ns-plan .st-row{display:grid;grid-template-columns:1fr auto;gap:calc(6px * var(--dens));margin-bottom:6px}
+.ns-plan .st-add{background:var(--y);border:none;border-radius:var(--r1);color:var(--on-y);
+        font:700 11px/1 var(--mono);letter-spacing:.06em;padding:calc(12px * var(--dens)) calc(14px * var(--dens));cursor:pointer;white-space:nowrap}
+.ns-plan .st-add:active{opacity:.82}
+.ns-plan .st-list{display:flex;flex-direction:column;gap:calc(5px * var(--dens));margin-top:4px}
+.ns-plan .st-item{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+         padding:calc(9px * var(--dens)) calc(12px * var(--dens));display:grid;grid-template-columns:1fr auto;gap:calc(10px * var(--dens));align-items:center}
+.ns-plan .st-item-txt{font:400 12px/1 var(--mono);color:var(--tx)}
+.ns-plan .st-del{background:none;border:none;color:var(--mu);font:400 13px/1 var(--mono);cursor:pointer;padding:calc(2px * var(--dens))}
+.ns-plan .st-del:active{color:var(--re)}
+
+/* the form's context banner is gone: the panel sits under the project's own
+   tile and names its section in .pf-head */
+
+/* Buttons ── */
+.ns-plan .btn{width:100%;background:var(--y);border:none;border-radius:var(--r1);color:var(--on-y);
+     font:700 14px/1 var(--head);letter-spacing:.1em;text-transform:var(--caps);
+     padding:calc(15px * var(--dens));cursor:pointer;margin-top:6px;transition:opacity .15s}
+.ns-plan .btn:active{opacity:.82}
+.ns-plan .btn-ghost{background:var(--s2);border:var(--bw) solid var(--bd);color:var(--tx);
+           font:400 11px/1 var(--mono);letter-spacing:.06em}
+
+/* Queue ── */
+.ns-plan .queue{padding:0 calc(18px * var(--dens))}
+.ns-plan .q-item{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r2);
+        padding:calc(13px * var(--dens)) calc(14px * var(--dens));margin-bottom:7px;display:grid;grid-template-columns:auto 1fr auto;
+        gap:calc(11px * var(--dens));align-items:start;transition:border-color .14s}
+.ns-plan .q-dot{width:8px;height:8px;border-radius:50%;background:var(--q-color,var(--mu));margin-top:4px}
+.ns-plan .q-item-body{min-width:0}
+.ns-plan .q-item-name{font:400 13px/1.4 var(--mono);color:var(--tx);margin-bottom:7px;word-break:break-word}
+.ns-plan .q-item-meta{display:flex;gap:calc(5px * var(--dens));flex-wrap:wrap}
+.ns-plan .q-pill{font:400 8px/1 var(--mono);letter-spacing:.08em;background:var(--s2);
+        border-radius:var(--r1);padding:calc(4px * var(--dens)) calc(7px * var(--dens));color:var(--mu);white-space:nowrap}
+.ns-plan .q-pill.hl{color:var(--q-color,var(--y))}
+.ns-plan .q-del{background:none;border:none;color:var(--mu);font:400 13px/1 var(--mono);cursor:pointer;padding:calc(2px * var(--dens)) 0 calc(2px * var(--dens)) calc(4px * var(--dens))}
+.ns-plan .q-del:active{color:var(--re)}
+
+/* The sent history ──
+   Same row as a queued task, but the whole row is the button: tapping it
+   picks the task, and the "+ calendar" on the title row copies a template
+   covering everything picked. A picked row wears its project's colour, the
+   way a queued project tile does. */
+.ns-plan .sent{padding:0 calc(18px * var(--dens));margin-top:26px}
+.ns-plan .sent-item{width:100%;grid-template-columns:auto 1fr;text-align:left;cursor:pointer;
+  transition:background var(--dur-1),border-color var(--dur-1)}
+.ns-plan .sent-item .q-item-name{display:block}
+.ns-plan .sent-item.on{background:color-mix(in srgb,var(--q-color,var(--y)) 14%,var(--s1));
+  border-color:var(--q-color,var(--y))}
+.ns-plan .sent-item.on .q-pill{color:var(--tx-2)}
+/* on the title row next to "clear all", and absent until something is picked */
+.ns-plan .row-acts{display:flex;align-items:center;gap:calc(10px * var(--dens))}
+.ns-plan .sent-export{display:flex;align-items:center;gap:4px;flex:0 0 auto;align-self:center;
+  background:var(--s2);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+  color:var(--tx-2);font:400 11px/1 var(--mono);letter-spacing:.04em;
+  padding:calc(6px * var(--dens)) calc(8px * var(--dens));cursor:pointer;transition:all var(--dur-1)}
+.ns-plan .sent-export svg{width:13px;height:13px;display:block}
+.ns-plan .sent-export:active{border-color:var(--y);color:var(--y)}
+
+/* an empty queue has no placeholder block: the title row already says "empty" */
+
+/* Send button
+   Sticky, and parked clear of the floating tab pill rather than under it. */
+.ns-plan .send-wrap{position:sticky;padding:0 calc(18px * var(--dens));margin-top:14px;
+  bottom:calc(var(--nav-fh) + max(6px, calc(var(--nav-gap) + env(safe-area-inset-bottom))) + 16px)}
+.ns-plan .btn-send{width:100%;background:var(--y);border:none;border-radius:var(--r1);color:var(--on-y);
+          font:700 15px/1 var(--head);letter-spacing:.1em;text-transform:var(--caps);
+          padding:calc(16px * var(--dens));cursor:pointer;transition:opacity .15s;
+          box-shadow:var(--shadow-lift)}
+.ns-plan .btn-send:active{opacity:.82}
+
+/* Settings (rendered inside the settings tab) ── */
+.ns-plan .settings-status{font:400 10px/1.5 var(--mono);letter-spacing:.06em;padding:calc(10px * var(--dens)) calc(13px * var(--dens));border-radius:var(--r1);margin-bottom:14px}
+.ns-plan .settings-status.ok{background:rgba(92,219,125,.08);border:var(--bw) solid rgba(92,219,125,.28);color:var(--gr)}
+.ns-plan .settings-status.err{background:rgba(224,96,96,.08);border:var(--bw) solid rgba(224,96,96,.28);color:var(--re)}
+.ns-plan .settings-status.idle{background:var(--s1);border:var(--bw) solid var(--bd);color:var(--mu)}
+.ns-plan select{width:100%;background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+       color:var(--tx);font:400 13px/1 var(--mono);padding:calc(11px * var(--dens)) calc(12px * var(--dens));outline:none;
+       -webkit-appearance:none;cursor:pointer}
+.ns-plan select:focus{border-color:var(--y)}
+.ns-plan .sec{font:700 10px/1 var(--head);letter-spacing:.15em;text-transform:var(--caps);color:var(--y);
+     margin:20px 0 12px;padding-bottom:calc(8px * var(--dens));border-bottom:var(--bw) solid var(--bd)}
+.ns-plan .sec:first-child{margin-top:0}
+.ns-plan hr{border:none;border-top:var(--bw) solid var(--bd);margin:6px 0 18px}
+
+/* Sending state ── */
+.ns-plan .send-log{background:var(--s1);border:var(--bw) solid var(--bd);border-radius:var(--r1);
+          padding:calc(13px * var(--dens));font:400 11px/1.8 var(--mono);color:var(--mu);
+          max-height:240px;overflow-y:auto;margin-bottom:14px}
+.ns-plan .send-log .ok{color:var(--gr)}
+.ns-plan .send-log .err{color:var(--re)}
+.ns-plan .send-log .pending{color:var(--mu)}
+
+/* What the day already holds
+   The line under the mode chips: whether the chosen day has a schedule stored,
+   and — in patch — which slots the export is about to touch. Three states, and
+   the colour is the whole message: grey for nothing there, accent for "there
+   is a day here", orange for "this will rewrite more than you may think".
+
+   `.opt-b.off` is the patch chip on a day with no record. Dimmed and still
+   tappable, exactly like a slot the template does not have (above): the tap is
+   what explains why it cannot be used. */
+.ns-plan .exp-onfile{margin-top:calc(7px * var(--dens));display:flex;flex-direction:column;
+  gap:calc(4px * var(--dens))}
+.ns-plan .exp-onfile em{font-style:normal;font:400 9.5px/1.6 var(--mono);letter-spacing:.03em;
+  color:var(--mu)}
+.ns-plan .exp-onfile em.on{color:var(--y)}
+.ns-plan .exp-onfile em.ok{color:var(--gr,#5cdb7d)}
+.ns-plan .exp-onfile em.warn{color:#ff9a14}
+.ns-plan .opt-b.off{opacity:.4;border-style:dashed}
+/* the patch warning is a reassurance, not an alarm — same box, other hue */
+.ns-plan .exp-warn.ok{background:rgba(92,219,125,.1);border-color:rgba(92,219,125,.32);color:#5cdb7d}

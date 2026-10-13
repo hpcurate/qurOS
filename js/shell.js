@@ -1,0 +1,1765 @@
+/* Shell owns navigation, shared overlays and credentials. Modules register
+   through Shell.register(). Load after Prefs and before app modules.
+   Read behaviour preferences live so settings apply without a reload. */
+
+/* Shared Todoist credential
+   DO, PLAN and STORE each used to keep their own copy of the same key. There is
+   one now, and every module reads it live through Creds.token() rather than
+   caching it, so saving in settings takes effect everywhere without a reload.
+
+   Saving also mirrors the value back into the three original keys, so the
+   standalone complete/, plan/ and eat/ apps keep working off the same token. */
+window.Creds = (function () {
+  'use strict';
+  const KEY          = 'root_todoist_v1';
+  const LEGACY_DO    = 'do_todoist_v1';
+  const LEGACY_PLAN  = 'plan_token';
+  const LEGACY_STORE = 'store_state_v1';
+
+  const readJSON = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } };
+
+  function token() { return (readJSON(KEY) || {}).token || ''; }
+
+  /* Whichever app still holds one wins; they are all meant to be the same
+     Todoist account key anyway. */
+  function legacyToken() {
+    const d = readJSON(LEGACY_DO);
+    if (d && d.token) return d.token;
+    const s = readJSON(LEGACY_STORE);
+    if (s && s.todoist && s.todoist.token) return s.todoist.token;
+    try { return localStorage.getItem(LEGACY_PLAN) || ''; } catch { return ''; }
+  }
+
+  function mirror(tok) {
+    try {
+      const d = readJSON(LEGACY_DO) || {};
+      d.token = tok;
+      localStorage.setItem(LEGACY_DO, JSON.stringify(d));
+      localStorage.setItem(LEGACY_PLAN, tok);
+      const s = readJSON(LEGACY_STORE);
+      if (s) {
+        s.todoist = Object.assign({}, s.todoist, { token: tok });
+        localStorage.setItem(LEGACY_STORE, JSON.stringify(s));
+      }
+    } catch {}
+  }
+
+  function save(tok) {
+    try { localStorage.setItem(KEY, JSON.stringify({ token: tok, saved: Date.now() })); } catch {}
+    mirror(tok);
+  }
+
+  // adopt an existing key on first run, before any module reads it
+  if (!token()) { const t = legacyToken(); if (t) save(t); }
+
+  return { token, save };
+})();
+
+
+/* Shared Todoist client
+   The unified v1 API, direct. DO keeps its own copy because it also offers the
+   worker proxy as an endpoint; TEND (and anything added later) uses this one.
+   getAll follows the {results,next_cursor} pagination v1 uses on some
+   collections and accepts the bare arrays it returns on others. */
+window.Todoist = (function () {
+  'use strict';
+  const BASE = 'https://api.todoist.com/api/v1';
+  async function call(path, opts = {}) {
+    const tok = Creds.token();
+    if (!tok) throw new Error('no Todoist key saved — add one under settings → data');
+    let res;
+    try {
+      res = await fetch(BASE + path, {
+        ...opts,
+        headers: { 'Authorization': 'Bearer ' + tok,
+                   ...(opts.body ? { 'Content-Type': 'application/json' } : {}), ...(opts.headers || {}) },
+      });
+    } catch {
+      throw new Error(location.protocol === 'file:'
+        ? 'blocked by the browser — serve over http(s), not as a local file'
+        : 'network error');
+    }
+    if (res.status === 401 || res.status === 403) throw new Error('token rejected by Todoist');
+    if (res.status === 429) throw new Error('rate limited by Todoist — wait a minute');
+    if (!res.ok) throw new Error('Todoist error ' + res.status);
+    const text = await res.text();          // /close and /reopen answer 204 with no body
+    return text ? JSON.parse(text) : null;
+  }
+  async function getAll(path, params = {}) {
+    const out = [];
+    let cursor = null;
+    do {
+      const q = new URLSearchParams({ ...params, limit: '200' });
+      if (cursor) q.set('cursor', cursor);
+      const page = await call(`${path}?${q}`);
+      if (Array.isArray(page)) { out.push(...page); cursor = null; }
+      else { out.push(...((page && page.results) || [])); cursor = (page && page.next_cursor) || null; }
+    } while (cursor);
+    return out;
+  }
+  /* "04 | life" and "04|life" are the same project. */
+  const name = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+                      .replace(/[^a-z0-9]+/g, ' ').trim();
+  async function resolve(project, section) {
+    const projects = await getAll('/projects');
+    const proj = projects.find(p => name(p.name) === name(project));
+    if (!proj) throw new Error(`project "${project}" not found (${projects.length} visible)`);
+    if (!section) return { projectId: proj.id, projectName: proj.name, sectionId: null, sectionName: '' };
+    const sections = await getAll('/sections', { project_id: proj.id });
+    const sec = sections.find(s => name(s.name) === name(section));
+    if (!sec) throw new Error(`section "${section}" not found in ${proj.name} — has: ${sections.map(s => s.name).join(', ') || 'none'}`);
+    return { projectId: proj.id, projectName: proj.name, sectionId: sec.id, sectionName: sec.name };
+  }
+  const due = task => { const d = task && task.due && task.due.date; return d ? String(d).slice(0, 10) : null; };
+
+  /* Todoist's twenty colour names, as hex. */
+  const COLORS = { berry_red:'#b8256f', red:'#db4035', orange:'#ff9933', yellow:'#fad000', olive_green:'#afb83b',
+    lime_green:'#7ecc49', green:'#299438', mint_green:'#6accbc', teal:'#158fad', sky_blue:'#14aaf5', light_blue:'#96c3eb',
+    blue:'#4073ff', grape:'#884dff', violet:'#af38eb', lavender:'#eb96eb', magenta:'#e05194', salmon:'#ff8d85',
+    charcoal:'#808080', grey:'#b8b8b8', taupe:'#ccac93' };
+
+  /* Label colours, shared ──
+     Every app that draws a Todoist label in its colour reads this one cache
+     (root_labels_v1: { fetched, colors:{ <folded name>: hex } }). DO fills it
+     as a side effect of its own /labels calls; PLAN asks labels() on show,
+     which refreshes it when it is older than an hour, single-flight. */
+  const LKEY = 'root_labels_v1';
+  let labelsBusy = null;
+  const readLabels = () => { try { return JSON.parse(localStorage.getItem(LKEY) || 'null') || null; } catch { return null; } };
+  function cacheLabels(list) {
+    const colors = {};
+    (list || []).forEach(l => { const hex = COLORS[l && l.color]; if (hex && l.name) colors[name(l.name)] = hex; });
+    try { localStorage.setItem(LKEY, JSON.stringify({ fetched: Date.now(), colors })); } catch {}
+    return colors;
+  }
+  function labelColors() { const r = readLabels(); return (r && r.colors) || {}; }
+  function labelColor(n) { return labelColors()[name(n)] || null; }
+  async function labels(maxAge = 60 * 60 * 1000) {
+    const rec = readLabels();
+    if (rec && Date.now() - (rec.fetched || 0) < maxAge) return rec.colors || {};
+    if (!Creds.token()) return (rec && rec.colors) || {};
+    if (!labelsBusy) labelsBusy = getAll('/labels').then(cacheLabels).catch(() => (rec && rec.colors) || {}).finally(() => { labelsBusy = null; });
+    return labelsBusy;
+  }
+  return { call, getAll, name, resolve, due, COLORS, cacheLabels, labelColors, labelColor, labels };
+})();
+
+
+window.Shell = (function () {
+  'use strict';
+
+  /* Every app the markup carries, and the tabs actually shown. TABS is rebuilt
+     from Settings → layout → "apps in the bar" (Prefs `apps`): the chosen apps
+     in the chosen order, then settings. It is mutated in place, never replaced,
+     so the reference handed out below stays live. */
+  const APPS = (window.Prefs && Prefs.APPS) || ['do', 'log', 'plan', 'store', 'tend', 'track', 'learn'];
+  const TABS = [];
+  const TAB_KEY = 'root_tab';          // last tab, so a reload lands where you left
+
+  const track    = document.getElementById('track');
+  const viewport = document.getElementById('views');
+  const navEl    = document.getElementById('nav');
+  const arrows   = Array.from(document.querySelectorAll('.nav-arrow'));
+  const prevBtn  = document.getElementById('nav-prev');
+  const nextBtn  = document.getElementById('nav-next');
+  const toastEl  = document.getElementById('toast');
+  const undoEl   = document.getElementById('undo-pill');
+  const undoTxt  = document.getElementById('undo-txt');
+  let transient  = null;               // an app kept out of the bar, opened from settings — see open()
+
+  const pref = (k, fallback) => (window.Prefs ? Prefs.get(k) : fallback);
+
+  let index = 0;
+  const apps = {};                     // name → { onShow, onDayChange, home }
+
+  const viewOf = n => document.getElementById('view-' + n);
+  const btnOf  = n => navEl.querySelector('.tab-b[data-app="' + n + '"]');
+
+  /* The title band
+     Each slide is a column: the home's .h-top as a fixed band at the top
+     (its own status-bar padding), then .view-body — the scroll container —
+     holding every screen. The band is not sticky inside the scroller, it is
+     outside it, so it never moves with the rubber-band and content starts
+     exactly under it. Done here, before the modules boot, so their scoped
+     lookups still find the header inside the view and their scrollTop writes
+     go to the body. A sub-screen hides the band (shell.css, :has) and brings
+     its own .hd. */
+  document.querySelectorAll('#track .view').forEach(v => {
+    const body = document.createElement('div');
+    body.className = 'view-body';
+    while (v.firstChild) body.appendChild(v.firstChild);
+    v.appendChild(body);
+    const head = body.querySelector('#s-home > .h-top');
+    if (head) v.insertBefore(head, body);
+    markWordmark(v);
+  });
+  const bodyOf = n => { const v = viewOf(n); return v ? (v.querySelector('.view-body') || v) : null; };
+
+  /* The wordmark's icon
+     The same glyph the app wears in the tab bar, put in front of its name in
+     the band. Injected here rather than typed into eleven headers: it is the
+     *tab's* icon by definition, so the only thing that could go wrong is one
+     of the eleven getting a different one, and the way to make that impossible
+     is to have one place decide.
+
+     Whether it is drawn, and whether the name beside it is, is `bandMark` —
+     one dial in appearance, read as a data attribute on the root, so this runs
+     once and the choice costs no JavaScript at all afterwards.
+
+     `#tab-set` for settings and `#tab-<id>` for everything else: the button's
+     data-app is the long name and the sprite is the short one, the same pair
+     prefs.js maps for the tab colours. */
+  function markWordmark(v) {
+    const logo = v.querySelector('.h-top .h-logo');
+    if (!logo || logo.querySelector('.h-logo-ic')) return;
+    const id = String(v.id || '').replace(/^view-/, '');
+    if (!id) return;
+    const sprite = id === 'settings' ? 'tab-set' : 'tab-' + id;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'h-logo-ic');
+    svg.setAttribute('aria-hidden', 'true');
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', '#' + sprite);
+    svg.appendChild(use);
+    /* Inside the wordmark rather than beside it. Five of the eleven bands have
+       no `.h-logo-row` around their title — they are a `.h-logo` sitting
+       straight in the band — so a sibling would need one of two layouts
+       depending on which band it landed in. A first child of the wordmark is
+       one shape everywhere, inherits the title's colour, and needs no band to
+       change its own layout to hold it. */
+    logo.insertBefore(svg, logo.firstChild);
+  }
+
+  /* Order the slides and the tab buttons to match the preference, and hide the
+     apps that are switched off. A hidden .view is display:none, so the flex
+     track still moves by whole visible slides and index arithmetic holds. */
+  function rebuild() {
+    const want = (pref('apps', APPS) || APPS).filter(a => APPS.includes(a));
+    TABS.length = 0;
+    TABS.push(...want, 'settings');
+    transient = null;
+    /* Moving a node out of the document and back resets its scroll position,
+       and this runs while the settings slide is scrolled down to the app list
+       — every switch there used to throw the page back to the top. Remember
+       where each slide was and put it back. */
+    const scrolls = APPS.concat('settings').map(bodyOf).filter(Boolean).map(v => [v, v.scrollTop]);
+    TABS.forEach(n => {
+      const v = viewOf(n), b = btnOf(n);
+      if (v) track.appendChild(v);
+      if (b) navEl.appendChild(b);
+    });
+    APPS.forEach(a => {
+      const on = want.includes(a);
+      const v = viewOf(a), b = btnOf(a);
+      if (v) v.classList.toggle('hidden', !on);
+      if (b) {
+        b.classList.toggle('hidden', !on);
+        // a button that leaves the list leaves go()'s reach too: clear its state
+        // here or a hidden tab stays "selected" forever
+        if (!on) { b.classList.remove('on'); b.setAttribute('aria-selected', 'false'); }
+      }
+    });
+    scrolls.forEach(([v, y]) => { if (y && v.scrollTop !== y) v.scrollTop = y; });
+  }
+
+  /* The apps switched off in the bar. Their slides are still in the track,
+     hidden; the settings home lists them and open() shows one on demand. */
+  function hidden() {
+    const want = (pref('apps', APPS) || APPS);
+    return APPS.filter(a => !want.includes(a));
+  }
+
+  // Dates
+  /* The local calendar day as YYYY-MM-DD, and the one definition of it. Every
+     module used to derive "today" its own way — DO and STORE through
+     toISOString(), which is UTC and so a day behind until 01:00 or 02:00 in
+     France, while Todoist due dates and LOG's records are local days. */
+  function today(d = new Date()) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  /* A phone keeps ROOT open for days at a time. Each module captured "today"
+     once at boot, so a tick made after midnight went into yesterday's record
+     until someone reloaded. The shell re-checks the date whenever the page
+     comes back, on every tab change and once a minute, and tells each module
+     that registered an onDayChange hook. */
+  let dayNow = today();
+  function checkDay() {
+    const d = today();
+    if (d === dayNow) return false;
+    dayNow = d;
+    Object.values(apps).forEach(a => {
+      if (a.onDayChange) { try { a.onDayChange(d); } catch (e) { console.error(e); } }
+    });
+    return true;
+  }
+  /* The same tick serves anything that has to notice the clock moving without
+     being on screen — LOG's alert icon, which turns on at 10:00 and at 21:00.
+     One timer, so there is one thing to keep in step rather than one per app. */
+  function minute() {
+    checkDay();
+    Object.values(apps).forEach(a => {
+      if (a.onMinute) { try { a.onMinute(); } catch (e) { console.error(e); } }
+    });
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') minute(); });
+  window.addEventListener('focus', minute);
+  setInterval(minute, 60 * 1000);
+
+  /* Asking, inside the app
+     `window.confirm` and `window.prompt` are the *system's* dialogs, not this
+     app's. They arrive in the platform's typeface at the top of the screen,
+     they ignore every dial in Settings, and on a phone they read as the
+     browser interrupting rather than as the app asking a question. One
+     overlay does both jobs now, and it is a `.modal-overlay` so Escape and the
+     keyboard suppression the shell already does for sheets reach it for free.
+
+     The cost is that asking can no longer be synchronous. `Shell.confirm` takes
+     *what to do* instead of answering:
+
+         Shell.confirm('Clear the list?', () => { … })
+
+     There is no return value to test, and every call site in every app was
+     rewritten. With "confirm before clearing" off the callback runs straight
+     away, which is exactly what that setting has always meant.
+
+     The window.* fallbacks below are for a page whose overlay markup is missing
+     — losing the action outright would be worse than a system box. */
+  const askEl    = document.getElementById('ask');
+  const askTitle = document.getElementById('ask-title');
+  const askBody  = document.getElementById('ask-body');
+  const askField = document.getElementById('ask-field');
+  const askInput = document.getElementById('ask-input');
+  const askYes   = document.getElementById('ask-yes');
+  const askNo    = document.getElementById('ask-no');
+  const askAlt   = document.getElementById('ask-alt');
+  const askActs  = document.getElementById('ask-acts');
+  let askDone = null;
+
+  /* One string in, a title and a body out: the question is the title and
+     whatever follows it is the detail. Keeps every existing message readable
+     without rewriting thirty of them. */
+  function splitAsk(msg) {
+    const s = String(msg == null ? '' : msg).trim();
+    const nl = s.indexOf('\n');
+    if (nl > 0) return { title: s.slice(0, nl).trim(), body: s.slice(nl).trim() };
+    const q = s.indexOf('? ');
+    if (q > 0) return { title: s.slice(0, q + 1), body: s.slice(q + 2).trim() };
+    return { title: s, body: '' };
+  }
+
+  function askSettle(answer) {
+    const fn = askDone;
+    askDone = null;
+    if (askEl) askEl.classList.add('hidden');
+    if (fn) { try { fn(answer); } catch (e) { console.error(e); } }
+  }
+
+  function ask(o) {
+    const opt = o || {};
+    const hasInput = typeof opt.input === 'string';
+    if (!askEl || !askYes || !askNo) {                 // no markup: do not lose the action
+      const a = hasInput ? window.prompt(opt.title || '', opt.input)
+                         : (window.confirm([opt.title, opt.body].filter(Boolean).join('\n\n')) || null);
+      if (opt.done) opt.done(hasInput ? a : (a ? true : null));
+      return;
+    }
+    askSettle(null);                                   // never stack two questions
+    askDone = opt.done || null;
+    if (askTitle) askTitle.textContent = opt.title || '';
+    if (askBody)  { askBody.textContent = opt.body || ''; askBody.classList.toggle('hidden', !opt.body); }
+    if (askField) askField.classList.toggle('hidden', !hasInput);
+    if (askInput) {
+      askInput.value = hasInput ? opt.input : '';
+      askInput.placeholder = opt.placeholder || '';
+    }
+    askYes.textContent = opt.yes || (hasInput ? 'save' : 'confirm');
+    askYes.classList.toggle('danger', opt.danger !== false && !hasInput);
+    askNo.textContent = opt.no || 'cancel';
+    /* The third answer. Two real outcomes stop being a yes/no, so the row
+       stops being two columns and stacks: three lozenges side by side on a
+       phone leaves no room for a verb worth reading. */
+    const hasAlt = !hasInput && typeof opt.alt === 'string' && opt.alt !== '';
+    if (askAlt) { askAlt.textContent = hasAlt ? opt.alt : ''; askAlt.hidden = !hasAlt; }
+    if (askActs) askActs.classList.toggle('three', hasAlt);
+    askEl.classList.remove('hidden');
+    // a text question wants the field; a yes/no wants neither field nor keyboard
+    setTimeout(() => { try { (hasInput ? askInput : askYes).focus(); } catch {} }, 0);
+  }
+
+  if (askYes) askYes.addEventListener('click', () =>
+    askSettle(askInput && askField && !askField.classList.contains('hidden') ? askInput.value : true));
+  if (askAlt) askAlt.addEventListener('click', () => askSettle('alt'));
+  if (askNo)  askNo.addEventListener('click', () => askSettle(null));
+  if (askEl)  askEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && askYes) { e.preventDefault(); askYes.click(); }
+  });
+
+  /* Honours Settings → behaviour → "confirm before clearing". Every reset and
+     clear button in the eight apps routes here; the preference used to be read
+     only by the settings view's own buttons, so turning it off did nothing
+     where it mattered.
+
+     Two shapes, because the call sites come in two shapes:
+
+       Shell.confirm(msg, () => { … })   the common one — a button handler
+       await Shell.confirm(msg)          inside something already async
+
+     The second exists so an async function that asks part-way through does not
+     have to be turned inside out; it answers true or false and nothing else. */
+  function confirmAction(msg, onOk) {
+    if (typeof onOk !== 'function') {
+      return new Promise(resolve => {
+        if (pref('confirmDestructive', true) === false) { resolve(true); return; }
+        const { title, body } = splitAsk(msg);
+        ask({ title, body, danger: true, done: a => resolve(!!a) });
+      });
+    }
+    if (pref('confirmDestructive', true) === false) { onOk(); return; }
+    const { title, body } = splitAsk(msg);
+    ask({ title, body, danger: true, done: a => { if (a) onOk(); } });
+  }
+  /* The same overlay with a field in it — the four places that asked for a
+     name or a date through window.prompt. Cancel answers null, never ''. */
+  function promptAction(msg, value, onOk) {
+    const { title, body } = splitAsk(msg);
+    ask({ title, body, input: String(value == null ? '' : value),
+          done: a => { if (a !== null && typeof onOk === 'function') onOk(a); } });
+  }
+
+  // Toast
+  /* One element for all five views. Every module's toast() forwards here, so a
+     message from STORE cannot be clobbered by a stale timer from LOG. */
+  let toastTimer = null;
+  function toast(msg) {
+    if (!toastEl) return;
+    if (window.Prefs && Prefs.sound) Prefs.sound('msg');
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), pref('toastMs', 1800));
+  }
+
+  // Undo
+  /* One pill for the whole app, the way there is one toast. A module that is
+     about to clear something takes a copy of what it is clearing, clears it,
+     and hands the way back to `Shell.undo(label, restore)`:
+
+         const was = state.list.slice();
+         state.list = []; save(); render();
+         Shell.undo(`${was.length} items cleared`, () => { state.list = was; save(); render(); });
+
+     It is offered *instead of* a toast, never as well as one — they occupy the
+     same spot, and "list cleared" said twice in two shapes is one message too
+     many. The restore is a closure over what was already read, so nothing has
+     to be stored: the way back lives exactly as long as the pill does, and a
+     reload is allowed to lose it. That is the honest lifetime — an undo that
+     survived a restart would be an edit history, which this is not.
+
+     One at a time, deliberately. A stack of undos on a phone is a stack of
+     pills, and the second clear is the one you meant. */
+  let undoTimer = null, undoFn = null;
+  function undo(label, restore) {
+    if (!undoEl) { if (typeof restore === 'function') toast(label); return; }
+    undoFn = typeof restore === 'function' ? restore : null;
+    if (undoTxt) undoTxt.textContent = label;
+    /* The glyph is a dial, so it is set when the pill is shown rather than
+       written into the markup. `none` is handled in CSS — the <use> is left
+       pointing at something valid so switching back has nothing to repair. */
+    const ico = undoEl.querySelector('.up-ico use');
+    if (ico) {
+      const pick = pref('undoIcon', 'undo');
+      ico.setAttribute('href', '#ico-' + (pick === 'none' ? 'undo' : pick));
+    }
+    undoEl.classList.add('show');
+    clearTimeout(undoTimer);
+    /* 0 pins it: it stays until it is tapped, or until the next clear takes
+       its place. Every other value is a window in seconds. */
+    const secs = +pref('undoSec', 5);
+    if (secs > 0) undoTimer = setTimeout(hideUndo, secs * 1000);
+  }
+  function hideUndo() { clearTimeout(undoTimer); undoFn = null; if (undoEl) undoEl.classList.remove('show'); }
+  if (undoEl) undoEl.addEventListener('click', () => {
+    const fn = undoFn;
+    hideUndo();
+    if (!fn) return;
+    fn();
+    if (window.Prefs && Prefs.tap) Prefs.tap();
+    toast('undone');
+  });
+
+  // Floating chrome
+  /* The pill and arrows hover over the content, so they step aside while you
+     read and come back the moment you scroll up, stop, or change tab. Turning
+     "get out of the way" off in settings pins them permanently. */
+  let chromeTimer = null;
+  function showChrome() {
+    navEl.classList.remove('chrome-off');
+    arrows.forEach(a => a.classList.remove('chrome-off'));
+  }
+  function hideChrome() {
+    if (!pref('autoHideChrome', true)) return;
+    navEl.classList.add('chrome-off');
+    arrows.forEach(a => a.classList.add('chrome-off'));
+  }
+  /* Scrolling suppresses the press wash
+     On a touch screen `:active` is applied the moment the finger lands and is
+     not cleared until it lifts, so a touch that turns into a scroll lights up
+     whatever row it started on and keeps it lit as the list moves under it.
+     One attribute on <html> takes --press to transparent for the length of the
+     gesture (tokens.css); a tap that is a tap still lights up, because a tap
+     does not scroll. The tail is short — long enough to outlast momentum
+     between two scroll events, short enough that the next real press is not
+     swallowed. */
+  const rootEl = document.documentElement;
+  let scrollFlag = null;
+  function markScrolling() {
+    rootEl.setAttribute('data-scrolling', 'on');
+    clearTimeout(scrollFlag);
+    scrollFlag = setTimeout(() => rootEl.removeAttribute('data-scrolling'), 160);
+  }
+  function watchScroll(view) {
+    let last = 0;
+    view.addEventListener('scroll', () => {
+      const y = view.scrollTop, dy = y - last;
+      last = y;
+      markScrolling();
+      clearTimeout(chromeTimer);
+      if (y > 72 && dy > 6)      hideChrome();
+      else if (dy < -6 || y < 8) showChrome();
+      chromeTimer = setTimeout(showChrome, 900);   // idle always brings it back
+    }, { passive: true });
+  }
+  /* A drag that has not moved the scroller yet — the first few pixels, and any
+     drag inside something that turns out not to scroll — still must not read
+     as a press. */
+  document.addEventListener('touchmove', markScrolling, { passive: true });
+
+  // Tabs
+  /* The slides are stacked, not side by side, and a tab change is a cross-fade
+     rather than a page slide: the slide for `index` takes .cur (opaque, and the
+     only one that takes a tap), the one it replaces keeps .leaving while it
+     fades out. The incoming slide also gets .morph for a beat, which is what
+     plays its title in — its wordmark on a home, or the header of whichever
+     sub-screen it was left on. With animate off (boot, and whenever TABS
+     changes shape underneath) the classes flip under #track.still, which is
+     dropped again once the change has been flushed. */
+  let curView = null, leaveTimer = null;
+  /* `dir` is +1 moving right through the tabs and -1 moving left; the titles
+     slide with it (the incoming one in from that side, the outgoing one out
+     the other), which is the only part of the change that carries a
+     direction — the pages themselves just cross-fade. */
+  function show(animate, dir) {
+    const next = viewOf(TABS[index]);
+    if (!next) return;
+    /* Which app is up, for the accent that follows the tab. Here rather than in
+       go(): park() lands on a slide without going anywhere — at boot, and every
+       time TABS changes shape under the current one — and the accent has to
+       follow that too. */
+    if (window.Prefs && Prefs.setApp) Prefs.setApp(TABS[index]);
+    if (!animate) track.classList.add('still');
+    document.querySelectorAll('#track .view.leaving').forEach(v => v.classList.remove('leaving'));
+    const changed = next !== curView;
+    const d = dir === -1 ? -1 : 1;
+    if (curView && changed) {
+      curView.style.setProperty('--dir', d);
+      curView.classList.remove('cur');
+      if (animate) curView.classList.add('leaving');
+    }
+    next.style.setProperty('--dir', d);
+    next.classList.add('cur');
+    if (animate && changed) { next.classList.remove('morph'); void next.offsetWidth; next.classList.add('morph'); }
+    curView = next;
+    if (!animate) { void track.offsetWidth; track.classList.remove('still'); }
+    clearTimeout(leaveTimer);
+    /* .morph comes off with .leaving. It used to be added and never removed,
+       so the title animation — `both`, so it holds its last frame — stayed
+       applied to the current slide's wordmark for as long as the app was
+       open. A held animation keeps the element on its own compositing layer,
+       and text on a layer is drawn with grayscale antialiasing instead of
+       subpixel: the title sat very slightly soft from the first tab change
+       until the next one. Taking the class off once the animation has played
+       hands the wordmark back to the normal text path. */
+    leaveTimer = setTimeout(() =>
+      document.querySelectorAll('#track .view.leaving, #track .view.morph')
+        .forEach(v => v.classList.remove('leaving', 'morph')), 900);
+  }
+
+  /* The tab buttons and arrows follow TABS by name, never by a cached list:
+     open() and retire() change TABS under them. */
+  function paintNav() {
+    // on an app opened from settings, the settings button wears that app's
+    // icon and lights up — tapping it still goes to the settings home
+    const onT = !!transient && TABS[index] === transient;
+    TABS.forEach((n, i) => {
+      const b = btnOf(n); if (!b) return;
+      const on = i === index || (n === 'settings' && onT);
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    const sb = btnOf('settings');
+    if (sb) {
+      const use = sb.querySelector('use'), lbl = sb.querySelector('.tb-l');
+      if (use) use.setAttribute('href', onT ? '#tab-' + transient : '#tab-set');
+      if (lbl) lbl.textContent = onT ? transient : 'set';
+      sb.setAttribute('aria-label', onT ? transient.toUpperCase() + ' · settings' : 'Settings');
+    }
+    if (nextBtn) nextBtn.disabled = index === TABS.length - 1;
+    updateBack();
+  }
+
+  /* Back, on the left arrow
+     Inside an app's sub-screen — a checklist, the evening form, a settings
+     category — the "← back" button sits top-left, the far corner of a phone.
+     Whenever the current slide is showing a sub-screen that has one, the left
+     arrow becomes that back button. A class change on any .scr is the signal,
+     and one observer on the track sees every app's without per-app wiring. */
+  function backTarget() {
+    const v = viewOf(TABS[index]); if (!v) return null;
+    const scr = v.querySelector('.scr.on');
+    if (!scr || scr.id === 's-home') return null;
+    return scr.querySelector('.hd-back');
+  }
+  function updateBack() {
+    if (!prevBtn) return;
+    const b = backTarget();
+    prevBtn.classList.toggle('is-back', !!b);
+    prevBtn.setAttribute('aria-label', b ? 'Back' : 'Previous tab');
+    prevBtn.disabled = b ? false : index === 0;
+  }
+  new MutationObserver(updateBack).observe(track, { attributes: true, subtree: true, attributeFilter: ['class'] });
+
+  /* Tapping the tab you are on goes to that app's home — its own hook where
+     it registered one, else its sub-screen's back button pressed until there
+     is none — and, already home, back to the top of the slide. */
+  function homeOf(name) {
+    const v = bodyOf(name);
+    const wasHome = !backTarget();
+    const app = apps[name];
+    if (app && app.home) app.home();
+    else for (let i = 0; i < 6 && backTarget(); i++) backTarget().click();
+    if (wasHome && v) { if (typeof v.scrollTo === 'function') v.scrollTo({ top: 0, behavior: 'smooth' }); else v.scrollTop = 0; }
+  }
+
+  /* Show the slide for the current index with no transition. Used at boot and
+     whenever TABS changes shape under the current slide. */
+  function park() { show(false); }
+
+  function go(name, opts = {}) {
+    const i = typeof name === 'number' ? name : TABS.indexOf(name);
+    if (i < 0 || i >= TABS.length) return;
+    checkDay();
+    /* Only a move makes a sound. `go()` is called to land on the tab already
+       shown often enough — a deep link, a restored start tab, a re-tap on the
+       live chip — and a note for standing still is a note for nothing. */
+    if (i !== index && window.Prefs && Prefs.sound) Prefs.sound('nav');
+    const dir = i < index ? -1 : 1;      // which way the titles slide
+    // the cursor belongs to the slide it was on, however the move was made
+    if (i !== index) clearSel();
+    index = i;
+    show(true, dir);
+    paintNav();
+    // leaving an app opened from settings: take its slide out again once the move has played
+    if (transient && TABS[i] !== transient) setTimeout(retire, 340);
+    showChrome();
+    clearTimeout(chromeTimer);
+    try { localStorage.setItem(TAB_KEY, TABS[i]); } catch {}
+    if (!opts.silent) {
+      const h = '#' + TABS[i];
+      // replaceState throws on a file:// origin in some browsers; the tab still
+      // works, it just cannot be linked to. A settings deep link
+      // (#settings/data) keeps its panel segment.
+      const keep = TABS[i] === 'settings' && location.hash.startsWith(h + '/');
+      try { if (location.hash !== h && !keep) history.replaceState(null, '', h); } catch {}
+    }
+    const app = apps[TABS[i]];
+    if (app && app.onShow) app.onShow();
+  }
+
+  /* An app switched off in the bar keeps its slide, hidden. The settings home
+     lists those apps, and opening one puts its slide back into the track just
+     before settings — no tab button — for as long as you stay on it. Leaving
+     it retires the slide once the move has played out, so the bar and the
+     track stay exactly what the app list says. */
+  function open(name) {
+    if (!APPS.includes(name)) return;
+    if (TABS.includes(name)) { go(name); return; }
+    if (transient) retire(true);
+    const v = viewOf(name); if (!v) return;
+    const cur = TABS[index];
+    transient = name;
+    TABS.splice(TABS.length - 1, 0, name);
+    track.insertBefore(v, viewOf('settings'));
+    v.classList.remove('hidden');
+    // settings moved one slide to the right: re-park on it before animating away
+    index = TABS.indexOf(cur);
+    park();
+    go(name);
+  }
+  function retire(force) {
+    if (!transient) return;
+    if (!force && TABS[index] === transient) return;   // came back to it before the timer fired
+    const name = transient, cur = TABS[index];
+    transient = null;
+    const v = viewOf(name);
+    TABS.splice(TABS.indexOf(name), 1);
+    if (v) v.classList.add('hidden');
+    index = Math.max(0, TABS.indexOf(cur === name ? 'settings' : cur));
+    park();
+    paintNav();
+  }
+
+  /* Every app's "settings" entry point routes here. */
+  function settings(panel) {
+    go('settings');
+    if (panel === 'general') panel = 'data';   // the 1.0 name for the key panel
+    if (window.SET && panel) SET.panel(panel);
+  }
+
+  /* Escape closes whatever sheet or modal is up. Each overlay's backdrop and
+     cancel button already know how to close their own sheet, so the shell just
+     presses them rather than knowing which module owns what. */
+  function closeOverlays() {
+    document.querySelectorAll('.sheet-back.on').forEach(b => b.click());
+    document.querySelectorAll('.modal-overlay:not(.hidden) .modal-cancel').forEach(b => b.click());
+  }
+
+  function register(name, api) { apps[name] = api || {}; }
+
+  /* A count on an app's tab button — DO uses it for what is still open today.
+     Zero removes it. The span is created on first use so the markup does not
+     have to know which apps count things. */
+  function badge(name, n) {
+    const b = btnOf(name); if (!b) return;
+    let el = b.querySelector('.tb-badge');
+    b.classList.toggle('has-badge', !!n);     // on the active tab the count replaces the icon
+    if (!n) { if (el) el.remove(); return; }
+    if (!el) { el = document.createElement('span'); el.className = 'tb-badge'; b.appendChild(el); }
+    el.textContent = n > 99 ? '99+' : String(n);
+  }
+
+  /* A "!" in place of an app's icon — LOG uses it when a half of the day is
+     still unwritten past its hour. Like badge(), this is the shell's to write:
+     an app that reaches into the nav itself is an app that fights paintNav.
+     The icon goes back to the app's own the moment the reason clears. */
+  function alert(name, on, why) {
+    const b = btnOf(name); if (!b) return;
+    b.classList.toggle('has-alert', !!on);
+    const use = b.querySelector('use');
+    if (use) use.setAttribute('href', on ? '#tab-alert' : '#tab-' + name);
+    b.setAttribute('aria-label', on ? `${name.toUpperCase()} · ${why || 'needs attention'}` : name.toUpperCase());
+  }
+
+  // bound by name, not position: the order is the user's to change
+  Array.from(navEl.querySelectorAll('.tab-b')).forEach(b =>
+    b.addEventListener('click', () => {
+      if (window.Prefs) Prefs.tap();
+      const name = b.dataset.app, cur = TABS[index];
+      // the settings button wearing a hidden app's icon: back to the settings home
+      if (name === 'settings' && transient && cur === transient) { if (window.SET) SET.home(); go('settings'); return; }
+      if (name === cur) homeOf(name); else go(name);
+    }));
+  if (prevBtn) prevBtn.addEventListener('click', () => {
+    const b = backTarget();
+    if (b) { if (window.Prefs) Prefs.tap(); b.click(); } else go(index - 1);
+  });
+  if (nextBtn) nextBtn.addEventListener('click', () => go(index + 1));
+  document.querySelectorAll('.view-body').forEach(watchScroll);
+
+  // Swipe
+  /* A horizontal drag picks the next or previous tab once it is far or fast
+     enough; the slide itself does not follow the finger, since a tab change
+     is a cross-fade. Vertical is left to the browser via touch-action:pan-y.
+     A gesture is refused outright when a sheet or modal is up, and when it
+     starts inside something that scrolls sideways itself (the .md preview
+     panes), where a swipe means "read the rest of this line". */
+  const FLICK = 0.45;   // px/ms that commits regardless of distance
+
+  let sx = 0, sy = 0, st = 0, dx = 0;
+  let tracking = false, axis = null;
+
+  function overlayOpen() {
+    return !!document.querySelector('.sheet-back.on') ||
+           !!document.querySelector('.modal-overlay:not(.hidden)');
+  }
+
+  function scrollsSideways(node) {
+    for (let el = node; el && el !== track; el = el.parentElement) {
+      if (el.scrollWidth > el.clientWidth + 2) {
+        const ox = getComputedStyle(el).overflowX;
+        if (ox === 'auto' || ox === 'scroll') return true;
+      }
+    }
+    return false;
+  }
+
+  /* A drag that starts inside a text field belongs to the field. On a phone that
+     gesture is how you place the caret and how you reach the paste callout —
+     taking it for the tab swipe made the settings view slide away mid-paste, so
+     the Todoist key could never be pasted in. */
+  function isEditable(node) {
+    if (!node || !node.closest) return false;
+    return !!node.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])');
+  }
+
+  track.addEventListener('touchstart', e => {
+    if (!pref('swipe', true)) { tracking = false; return; }
+    if (e.touches.length !== 1 || overlayOpen()) { tracking = false; return; }
+    const t = e.touches[0];
+    // iOS reserves the left edge for its own back gesture
+    if (t.clientX < 22) { tracking = false; return; }
+    if (isEditable(e.target) || scrollsSideways(e.target)) { tracking = false; return; }
+    sx = t.clientX; sy = t.clientY; st = Date.now();
+    dx = 0; axis = null; tracking = true;
+  }, { passive: true });
+
+  track.addEventListener('touchmove', e => {
+    if (!tracking) return;
+    const t = e.touches[0];
+    const mx = t.clientX - sx, my = t.clientY - sy;
+    if (axis === null) {
+      if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
+      axis = Math.abs(mx) > Math.abs(my) * 1.3 ? 'x' : 'y';
+      if (axis === 'y') { tracking = false; return; }
+      showChrome();
+    }
+    dx = mx;
+  }, { passive: true });
+
+  /* The slide does not follow the finger any more — a tab change is a
+     cross-fade — so the drag only picks the next or previous tab once it is
+     far enough or fast enough, and does nothing at all otherwise. */
+  function endDrag() {
+    if (!tracking) return;
+    tracking = false;
+    if (axis !== 'x') return;
+    const w = viewport.clientWidth || 1;
+    const speed = Math.abs(dx) / Math.max(1, Date.now() - st);
+    const far = Math.abs(dx) > w * pref('swipeStrength', 0.22) || speed > FLICK;
+    let next = index;
+    if (far && dx < 0) next = Math.min(TABS.length - 1, index + 1);
+    if (far && dx > 0) next = Math.max(0, index - 1);
+    if (next !== index) { if (window.Prefs) Prefs.tap(); go(next); }
+    dx = 0; axis = null;
+  }
+  track.addEventListener('touchend', endDrag, { passive: true });
+  track.addEventListener('touchcancel', endDrag, { passive: true });
+
+  /* #do … #settings select a tab; #settings/<panel> lands on one panel. */
+  function hashTarget() {
+    const [name, sub] = location.hash.replace('#', '').split('/');
+    return { name: TABS.includes(name) ? name : null, sub: sub || null };
+  }
+  window.addEventListener('hashchange', () => {
+    const { name, sub } = hashTarget();
+    if (!name) { const raw = location.hash.replace('#', '').split('/')[0]; if (hidden().includes(raw)) open(raw); return; }
+    if (TABS[index] !== name) go(name, { silent: true });
+    if (name === 'settings' && sub && window.SET) SET.panel(sub);
+  });
+
+  /* The cursor
+     Up and down walk the slide you are on, so a laptop can reach a tick box
+     without a mouse and without tabbing past every control above it.
+
+     **It walks two levels.** 4.5 shipped one flat list, and on a dense screen
+     that is forty steps to reach the bottom — which is what "it scrolls
+     between elements inconsistently" was really describing. So the cursor
+     starts on **blocks**, the act key steps *into* one, and up/down then walk
+     that block's own controls. Escape (or the `out` key) steps back out.
+
+     What counts as a block is derived, not listed. A per-app list of container
+     classes would be ten things to keep in step and would go stale the first
+     time a screen was rebuilt. Instead `blocksOf()` walks down from the screen
+     through any run of single-child wrappers until it reaches a level with
+     more than one thing on it — which is that screen's own idea of its
+     sections, whatever the markup happens to be called.
+
+     Two rules from 4.5 that carry over:
+
+     The list is rebuilt on every move rather than cached. These screens
+     re-render constantly — a tick, a config change, a day rolling over — and a
+     cached list would hand back nodes that are no longer in the document. Any
+     miss simply restarts at the top, so the cursor heals itself instead of
+     going stale.
+
+     A text field is *selected but not focused*. The bindings are letters, so a
+     focused field would both swallow them and type them; the cursor stops on
+     the field, the act key steps into it and Escape steps back out. */
+
+  /* Anything that answers to a press. `[onclick]` and `[data-act]` are in here
+     because half of ROOT's controls are neither buttons nor links — DO's
+     routine cards are `<div onclick>`, and TEND, CAL, CREATE and TOOLS all
+     dispatch off `data-act`. Leaving them out is why a routine could not be
+     selected at all. */
+  const FOCUSABLE = 'button,[role="switch"],[role="tab"],[role="button"],a[href],' +
+                    'input,select,textarea,summary,[onclick],[data-act],' +
+                    '[tabindex]:not([tabindex="-1"])';
+
+  let selEl = null;                 // what the cursor is on
+  let selBlock = null;              // the block it came out of, while inside one
+  let markEl = null;                // the arrow, made on first use
+
+  const liveView = () => document.querySelector('#track .view.cur');
+
+  /* Is this on screen?
+     Asked in ROOT's own vocabulary rather than through `offsetParent`, for two
+     reasons. `offsetParent` is null for anything `position:fixed`, so the pad,
+     the sheets and the nav all read as hidden when they are the only thing you
+     can see. And it is null for *everything* under jsdom, which is why the
+     cursor shipped three times without a single check that could drive it —
+     the part of the app that most needed testing was the part the harness
+     could not touch. These rules are how this app actually hides things, and
+     every one of them is answerable from the DOM alone. */
+  function shown(el) {
+    if (!el || el.disabled) return false;
+    for (let n = el; n && n.nodeType === 1 && n !== document.body; n = n.parentElement) {
+      if (n.hidden) return false;
+      if (n.style && n.style.display === 'none') return false;
+      const c = n.classList;
+      if (!c) continue;
+      if (c.contains('hidden')) return false;
+      if (c.contains('scr')  && !c.contains('on'))  return false;   // a screen not open
+      if (c.contains('view') && !c.contains('cur')) return false;   // a slide not current
+    }
+    return true;
+  }
+  const focusablesIn = root =>
+    root ? Array.from(root.querySelectorAll(FOCUSABLE)).filter(shown) : [];
+  /* A block that is itself pressable counts as its own content — a routine card
+     is one thing, not a container of one thing. */
+  const itemsOf = block => {
+    if (!block) return [];
+    const inner = focusablesIn(block);
+    if (inner.length) return inner;
+    return shown(block) && block.matches(FOCUSABLE) ? [block] : [];
+  };
+
+  /* This screen's own sections.
+
+     The **root** matters more than the descent, and getting it wrong is what
+     made "step into a block" do nothing useful: a `.view` has exactly two
+     children — the title band and `.view-body` — so asking it for its blocks
+     answered "the band, and everything else on the page". Stepping into the
+     second handed back a flat list of every control on the screen, which is
+     precisely what blocks were added to replace.
+
+     So the band is one block, and the rest are the sections of whichever
+     screen is actually open. From there, descend through any run of
+     single-child wrappers — a lone `.cnt`, a lone grid — until there is more
+     than one thing to choose between. */
+  const isLeaf = el => itemsOf(el).length <= 1;
+  function sectionsOf(node) {
+    for (let depth = 0; depth < 8 && node; depth++) {
+      const kids = Array.from(node.children).filter(el => shown(el) && itemsOf(el).length);
+      if (!kids.length) return [];
+      if (kids.length > 1) return kids;
+      /* Exactly one child, and whether to unwrap it is the whole question.
+         DO's home is the case that got this wrong: its only child with anything
+         in it is the routine grid, and unwrapping that handed back six cards as
+         six "blocks" — every one of them a leaf with nothing to step into,
+         which is exactly "I can't go into one block".
+
+         So a lone child is only unwrapped when it is a group **of groups**. A
+         container whose children are the controls themselves is the block. */
+      const only = kids[0];
+      const inner = Array.from(only.children).filter(el => shown(el) && itemsOf(el).length);
+      if (inner.length > 1 && inner.some(el => !isLeaf(el))) { node = only; continue; }
+      return [only];
+    }
+    return [];
+  }
+
+  function blocksOf(view) {
+    if (!view) return [];
+    const out = [];
+    const band = Array.from(view.children).find(el => el.classList.contains('h-top'));
+    if (band && shown(band) && itemsOf(band).length) out.push(band);
+
+    const body = view.querySelector('.view-body') || view;
+    /* The open screen, not the scroller: `.view-body` holds every screen the
+       app has and only one of them is `.on`. */
+    const scr = Array.from(body.children).find(el => el.classList.contains('scr') && shown(el))
+             || body;
+    out.push(...sectionsOf(scr));
+
+    /* A screen with nothing to group is its own controls — a flat list beats
+       an empty one. */
+    return out.length ? out : focusablesIn(view);
+  }
+
+  const level = () => (selBlock ? 'item' : 'block');
+  function ring() {
+    const view = liveView();
+    if (!view) return [];
+    return selBlock ? itemsOf(selBlock) : blocksOf(view);
+  }
+
+  /* The mark
+     A small arrow that hovers at the bottom-right of whatever is selected,
+     rather than an outline around it. It is `position:fixed` and a sibling of
+     #views for the reason §6 gives — inside #track a transformed ancestor
+     would become its containing block — and it is measured off
+     getBoundingClientRect, so it follows an element of any shape without that
+     element needing to know it exists. */
+  function mark(el) {
+    if (!el) { if (markEl) markEl.classList.remove('on'); return; }
+    /* Only the arrow style draws one; the others are all on the selection
+       itself, so there is nothing to place. */
+    if ((pref('kbMark', 'glow') || 'glow') !== 'arrow') {
+      if (markEl) markEl.classList.remove('on');
+      return;
+    }
+    if (!markEl) {
+      markEl = document.createElement('div');
+      markEl.id = 'kb-mark';
+      markEl.setAttribute('aria-hidden', 'true');
+      markEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+        'stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M7 17L17 7M17 7h-7M17 7v7"/></svg>';
+      document.body.appendChild(markEl);
+    }
+    const r = el.getBoundingClientRect();
+    markEl.style.left = Math.round(r.right) + 'px';
+    markEl.style.top  = Math.round(r.bottom) + 'px';
+    markEl.classList.toggle('deep', level() === 'item');
+    markEl.classList.add('on');
+  }
+
+  function clearSel() {
+    if (selEl) selEl.classList.remove('kb-sel');
+    selEl = null; selBlock = null;
+    mark(null);
+  }
+  function paintSel() {
+    if (!selEl) return;
+    selEl.classList.add('kb-sel');
+    try { selEl.scrollIntoView({ block: 'nearest' }); } catch {}
+    /* The arrow is measured after the scroll, or it points at where the
+       element used to be. */
+    mark(selEl);
+    if (level() === 'item' && !isEditable(selEl)) { try { selEl.focus({ preventScroll: true }); } catch {} }
+  }
+
+  /* Moving, by where things actually are
+     4.5 and 4.9 both walked the list in **document order**, and that is what
+     "it scrolls between elements inconsistently" was: DO's home is a two-column
+     grid, so the next node in the document is the card to the *right*, and the
+     one after that is down-and-left. Pressing "down" moved right. Every grid,
+     every row of chips and every pair of buttons on a row had the same
+     problem.
+
+     So a direction is now a direction. Each key picks the nearest candidate
+     that genuinely lies that way, measured off the boxes the browser has
+     already laid out — which is the same rule a person's eye is using, and the
+     reason it needs no per-screen knowledge to feel right.
+
+     Up and down fall back to document order when nothing lies that way, so two
+     keys always reach everything on a screen; left and right do not, because a
+     left that jumps to the end of the previous row is the surprise this was
+     meant to remove. */
+  const boxOf = el => el.getBoundingClientRect();
+  const midX = r => r.left + r.width / 2;
+  const midY = r => r.top + r.height / 2;
+  const spanX = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left);
+  const spanY = (a, b) => Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+
+  function nearest(dir) {
+    const list = ring();
+    if (!selEl) return list[0] || null;
+    const a = boxOf(selEl);
+    let best = null, bestScore = Infinity;
+    for (const el of list) {
+      if (el === selEl) continue;
+      const r = boxOf(el);
+      let gap, off, lined;
+      if (dir === 'down')       { if (r.top    < a.bottom - 2) continue; gap = r.top - a.bottom;  off = Math.abs(midX(r) - midX(a)); lined = spanX(a, r) > 0; }
+      else if (dir === 'up')    { if (r.bottom > a.top    + 2) continue; gap = a.top - r.bottom;  off = Math.abs(midX(r) - midX(a)); lined = spanX(a, r) > 0; }
+      else if (dir === 'right') { if (r.left   < a.right  - 2) continue; gap = r.left - a.right;  off = Math.abs(midY(r) - midY(a)); lined = spanY(a, r) > 0; }
+      else                      { if (r.right  > a.left   + 2) continue; gap = a.left - r.right;  off = Math.abs(midY(r) - midY(a)); lined = spanY(a, r) > 0; }
+      /* Something sharing a row or a column with us is almost always the thing
+         meant, so being out of line costs eight times as much as distance. */
+      const score = Math.max(0, gap) + off * (lined ? 0.25 : 8);
+      if (score < bestScore) { bestScore = score; best = el; }
+    }
+    return best;
+  }
+
+  /* Document order, for the fallback and for a first press. */
+  function stepSel(step) {
+    const list = ring();
+    if (!list.length) return null;
+    const at = selEl ? list.indexOf(selEl) : -1;
+    return list[at < 0 ? (step > 0 ? 0 : list.length - 1)
+                       : (at + step + list.length) % list.length] || null;
+  }
+
+  function moveSel(dir) {
+    const list = ring();
+    if (!list.length) { clearSel(); return; }
+    let next = null;
+    if (dir === 'up' || dir === 'down') {
+      next = nearest(dir) || stepSel(dir === 'down' ? 1 : -1);
+    } else {
+      next = nearest(dir);
+      if (!next && !selEl) next = list[0];
+    }
+    if (!next || next === selEl) return;
+    if (selEl) selEl.classList.remove('kb-sel');
+    selEl = next;
+    paintSel();
+  }
+
+  /* Into a block, or onto the thing the block is. A block holding one control
+     *is* that control, so stepping in and immediately having to press again
+     would be a step that did nothing. */
+  function enterSel() {
+    if (level() === 'item' || !selEl) return false;
+    const items = itemsOf(selEl);
+    if (items.length <= 1) return false;      // nothing inside worth a level
+    selBlock = selEl;
+    selEl.classList.remove('kb-sel');
+    selEl = items[0];
+    paintSel();
+    return true;
+  }
+  function leaveSel() {
+    if (level() !== 'item') return false;
+    const was = selBlock;
+    if (selEl) selEl.classList.remove('kb-sel');
+    selBlock = null;
+    const list = ring();
+    selEl = list.includes(was) ? was : (list[0] || null);
+    if (selEl) paintSel(); else clearSel();
+    return true;
+  }
+
+  /* Answers whether it did anything, so the act key with nothing selected is
+     still the page-scroll key the browser makes it. */
+  function actOnSel() {
+    if (!selEl || !selEl.isConnected) { clearSel(); return false; }
+    if (isEditable(selEl)) { try { selEl.focus(); } catch {} return true; }
+    if (level() === 'block' && enterSel()) return true;
+    /* A block of one is that one control — press it rather than descending
+       into a level with a single occupant. */
+    const target = level() === 'block' ? (itemsOf(selEl)[0] || selEl) : selEl;
+    target.click();
+    /* The press almost always re-renders the screen underneath the cursor. */
+    setTimeout(() => { if (selEl && !selEl.isConnected) clearSel(); else if (selEl) mark(selEl); }, 0);
+    return true;
+  }
+
+  /* The arrow is measured in viewport coordinates, so anything that moves the
+     page moves it too. */
+  ['scroll', 'resize'].forEach(ev =>
+    window.addEventListener(ev, () => { if (selEl) mark(selEl); }, true));
+
+  /* Keyboard
+     ROOT is a phone app that also runs on a laptop, where five slides and no
+     keyboard route is a real gap. Every binding is ignored while a field has
+     focus, so typing never navigates, and while a sheet is up, because a sheet
+     owns the keyboard — STORE's numpad reads digits, and "3" used to type a 3
+     AND jump to PLAN.
+
+     The arrows, 1-9 and "/" are built in: they read the same on every keyboard,
+     so there is nothing to choose. The seven in `keyMap` are rebindable because
+     their defaults are a guess about a layout — see Prefs.SCHEMA. A custom
+     binding is checked first, so rebinding `up` onto a digit is allowed to win
+     over the jump-to-tab key. */
+  const KEY_ACTIONS = ['prev', 'next', 'up', 'down', 'left', 'right', 'act', 'in', 'out'];
+
+  function actionFor(e) {
+    const map = (window.Prefs && Prefs.get('keyMap')) || {};
+    const k = e.key.toLowerCase();
+    for (let i = 0; i < KEY_ACTIONS.length; i++) {
+      const a = KEY_ACTIONS[i];
+      if (map[a] && map[a] === k) return a;
+    }
+    /* All four arrows are the cursor now. They used to be two cursor keys and
+       two tab keys, which meant the four keys that look like a direction pad
+       did two unrelated jobs — and left/right could not be used for what they
+       obviously mean. Tabs are the letters and 1-9. */
+    if (e.key === 'ArrowUp')    return 'up';
+    if (e.key === 'ArrowDown')  return 'down';
+    if (e.key === 'ArrowLeft')  return 'left';
+    if (e.key === 'ArrowRight') return 'right';
+    return null;
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && overlayOpen()) { closeOverlays(); return; }
+    if (!pref('keyboardNav', true)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (overlayOpen()) return;
+
+    /* Escape is the only binding that reaches a focused field: it is the way
+       back out of one the cursor stepped into. */
+    if (isEditable(document.activeElement)) {
+      if (e.key !== 'Escape') return;
+      try { document.activeElement.blur(); } catch {}
+      if (selEl) { selEl.classList.add('kb-sel'); mark(selEl); }
+      e.preventDefault();
+      return;
+    }
+    /* Escape climbs one level before it gives up the cursor altogether, so the
+       way out is the same key however deep you are. */
+    if (e.key === 'Escape') { if (!leaveSel()) clearSel(); return; }
+
+    switch (actionFor(e)) {
+      case 'prev':  clearSel(); go(index - 1); e.preventDefault(); return;
+      case 'next':  clearSel(); go(index + 1); e.preventDefault(); return;
+      case 'up':    moveSel('up');    e.preventDefault(); return;
+      case 'down':  moveSel('down');  e.preventDefault(); return;
+      case 'left':  moveSel('left');  e.preventDefault(); return;
+      case 'right': moveSel('right'); e.preventDefault(); return;
+      case 'in':    if (!selEl) moveSel('down'); else enterSel(); e.preventDefault(); return;
+      case 'out':   if (!leaveSel()) clearSel(); e.preventDefault(); return;
+      case 'act':   if (actOnSel()) e.preventDefault(); return;
+    }
+
+    if (e.key >= '1' && e.key <= '9') { clearSel(); go(+e.key - 1); e.preventDefault(); }
+    /* "/" is search now. It used to open settings, which was a shortcut to a
+       menu rather than to a thing; search reaches the same panels by name, and
+       everything else besides. Without the search module it still opens
+       settings, so the key is never dead. */
+    else if (e.key === '/') { if (window.SEARCH) SEARCH.open(); else settings(); e.preventDefault(); }
+  });
+
+  /* Where the platform allows it (Android, installed), actually lock the
+     orientation; everywhere else the CSS curtain does the job. */
+  function lockPortrait() {
+    try {
+      if (!pref('lockPortrait', true) || !screen.orientation || !screen.orientation.lock) return;
+      screen.orientation.lock('portrait').catch(() => {});
+    } catch {}
+  }
+  lockPortrait();
+  if (window.Prefs) Prefs.subscribe(k => {
+    if (k !== 'lockPortrait' && k !== '*') return;
+    if (pref('lockPortrait', true)) lockPortrait();
+    else { try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch {} }
+  });
+
+  /* Decimal fields
+     A French keyboard's decimal keypad offers "," and iOS refuses a comma in a
+     type=number field outright, so weight, sleep and km could not be typed on
+     the phone at all. Those fields are type=text + inputmode=decimal now, and
+     this one rule turns the comma into a dot as it is typed, keeping the caret
+     where it was. Any module reading them gets a parseFloat-able string. */
+  document.addEventListener('input', e => {
+    const el = e.target;
+    if (!el || el.tagName !== 'INPUT' || el.type !== 'text' || el.getAttribute('inputmode') !== 'decimal') return;
+    if (!el.value.includes(',')) return;
+    const pos = el.selectionStart;
+    el.value = el.value.replace(/,/g, '.');
+    try { if (pos !== null) el.setSelectionRange(pos, pos); } catch {}
+  }, true);
+
+  /* Shared numpad modes: int, decimal, duration (720 -> 7.33 hours), and
+     clock (930 -> 09:30). data-pad overrides inference; off uses the keyboard.
+     Prevent focus while the pad owns a field to avoid iOS viewport shifts.
+     Preserve its original inputmode in data-pad-im. Keys handle pointerdown;
+     retain keyboard clicks and suppress duplicate clicks from the same gesture. */
+  const npadEl    = document.getElementById('npad');
+  const npadBack  = document.getElementById('npad-back');
+  const npadLabel = document.getElementById('npad-label');
+  const npadVal   = document.getElementById('npad-val');
+  const npadNote  = document.getElementById('npad-note');
+  const PAD_KINDS = ['int', 'decimal', 'duration', 'clock'];
+
+  let padTarget = null, padKind = 'int', padBuf = '', padFresh = true;
+  let padUnit = '';
+
+  /* The unit the number is in
+     A pad-owned field is never focused, so the only thing on screen while you
+     answer it is the pad: the label it is asking under, and a number. "45" is
+     not an answer, "45 s" is, and the difference matters most on exactly the
+     fields where the unit is not in the label you can still see — the pad
+     covers the bottom half of the form.
+
+     `data-unit` on the input declares it. Nothing is inferred: a unit guessed
+     from a label is a unit that is wrong on the one field nobody checked, and
+     a number with the wrong unit under it is worse than a bare number. The
+     duration and clock kinds ignore it — they already read as 7h20m and 09:30,
+     which is what a unit is for. */
+  const padUnitOf = el => String((el && el.dataset && el.dataset.unit) || '').trim().slice(0, 6);
+
+  function padKindOf(el) {
+    if (!el || el.tagName !== 'INPUT' || el.disabled || el.readOnly) return null;
+    const d = el.dataset.pad;
+    if (d === 'off') return null;
+    if (d && PAD_KINDS.includes(d)) return d;
+    // once armed the live inputmode is "none"; the original is what classifies
+    const im = el.dataset.padIm !== undefined ? el.dataset.padIm : (el.getAttribute('inputmode') || '');
+    if (el.type === 'number') {
+      const step = parseFloat(el.getAttribute('step'));
+      return im === 'decimal' || (isFinite(step) && step % 1 !== 0) ? 'decimal' : 'int';
+    }
+    if (el.type === 'text' || el.type === 'tel') {
+      if (im === 'decimal') return 'decimal';
+      if (im === 'numeric') return 'int';
+    }
+    return null;
+  }
+
+  /* auto is the honest default: the system keyboard is only in the way where
+     it is a *virtual* keyboard, and a laptop's number field is fine as it is. */
+  function padWanted() {
+    const m = pref('numpad', 'auto');
+    if (m === 'off') return false;
+    if (m === 'always') return true;
+    try { return !!(window.matchMedia && window.matchMedia('(pointer:coarse)').matches); }
+    catch { return false; }
+  }
+
+  function padArm(el) {
+    const kind = padKindOf(el);
+    if (!kind) return null;
+    if (el.dataset.padIm === undefined) el.dataset.padIm = el.getAttribute('inputmode') || '';
+    if (padWanted()) el.setAttribute('inputmode', 'none');
+    else if (el.dataset.padIm) el.setAttribute('inputmode', el.dataset.padIm);
+    else el.removeAttribute('inputmode');
+    return kind;
+  }
+
+  /* What the field already holds, back as keystrokes — so opening the pad on a
+     filled field continues it rather than starting again. */
+  function padSeed(el, kind) {
+    const v = String(el.value == null ? '' : el.value).trim().replace(',', '.');
+    if (!v) return '';
+    if (kind === 'duration') {
+      const n = parseFloat(v);
+      if (!isFinite(n) || n < 0) return '';
+      const h = Math.floor(n), m = Math.round((n - h) * 60);
+      return m ? String(h) + String(m).padStart(2, '0') : String(h);
+    }
+    if (kind === 'clock') return v.replace(/\D/g, '').slice(0, 4);
+    if (kind === 'int')   return v.replace(/[^\d]/g, '').slice(0, 9);
+    return v.replace(/[^\d.]/g, '').slice(0, 12);
+  }
+
+  /* The buffer, read two ways: what goes in the field, and what the pad says
+     it means. They are the same for a plain number and deliberately different
+     for a duration — you type 720 and the note says 7h20m · 7.33. */
+  function padRead(kind, buf) {
+    if (kind === 'duration') {
+      const s = buf.replace(/\D/g, '');
+      if (!s) return { value: '', read: '', note: 'hours then minutes — 720 is 7h20m' };
+      const h = s.length <= 2 ? +s : +s.slice(0, -2);
+      const m = s.length <= 2 ? 0  : +s.slice(-2);
+      if (m > 59) return { value: '', read: s, note: 'minutes only go up to 59', bad: true };
+      const dec = Math.round((h + m / 60) * 100) / 100;
+      return { value: String(dec), read: `${h}h${String(m).padStart(2, '0')}m`,
+               note: `saved as ${dec}` };
+    }
+    if (kind === 'clock') {
+      const s = buf.replace(/\D/g, '');
+      if (!s) return { value: '', read: '', note: 'hours then minutes — 930 is 09:30' };
+      const p = s.padStart(3, '0');
+      const h = +p.slice(0, p.length - 2), m = +p.slice(-2);
+      if (h > 23 || m > 59) return { value: '', read: s, note: 'not a time of day', bad: true };
+      const t = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+      return { value: t, read: t, note: '' };
+    }
+    return { value: buf, read: buf, unit: buf ? padUnit : '', note: '' };
+  }
+
+  /* The label the field is asking under, so the pad says what it is for. */
+  function padLabelOf(el) {
+    const box = el.closest('.f,.setting-row,.slider-row,.field,.ed-toggle,.ed-grid > div,.ed-pair > div');
+    const lbl = box && box.querySelector('label,.lbl,.setting-lbl');
+    const txt = (lbl && lbl.textContent) || el.getAttribute('aria-label') || el.placeholder || 'number';
+    return String(txt).replace(/\s+/g, ' ').trim().slice(0, 42);
+  }
+
+  function padPaint() {
+    const r = padRead(padKind, padBuf);
+    if (npadVal) {
+      /* The unit is a span rather than part of the string: it is set smaller
+         and quieter than the number, so 64.5 stays the thing being read. */
+      npadVal.textContent = r.read || '0';
+      if (r.unit) npadVal.appendChild(Object.assign(document.createElement('span'),
+                                                    { className: 'npad-unit', textContent: r.unit }));
+      npadVal.classList.toggle('empty', !r.read);
+      npadVal.classList.toggle('bad', !!r.bad);
+    }
+    if (npadNote) npadNote.textContent = r.note || '';
+    const dot = npadEl && npadEl.querySelector('[data-npad="."]');
+    if (dot) dot.disabled = padKind !== 'decimal';
+    return r;
+  }
+
+  function padCommit() {
+    const r = padPaint();
+    if (!padTarget || r.bad) return;
+    padTarget.value = r.value;
+    padTarget.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function padOpen(el, kind) {
+    if (padTarget && padTarget !== el) padClose();
+    /* Nothing may be focused while the pad is up. A live system keyboard has
+       already shrunk the visual viewport, and the pad is fixed — see the note
+       under "An overlay owns the page" below. */
+    const active = document.activeElement;
+    if (active && active !== document.body && active.blur) { try { active.blur(); } catch {} }
+    padTarget = el; padKind = kind; padBuf = padSeed(el, kind); padFresh = true;
+    padUnit = (kind === 'duration' || kind === 'clock') ? '' : padUnitOf(el);
+    // the field is not focused, so it says which one is being edited itself
+    el.classList.add('pad-on');
+    if (npadLabel) npadLabel.textContent = padLabelOf(el);
+    padPaint();
+    if (npadBack) npadBack.classList.add('on');
+    if (npadEl) npadEl.classList.add('on');
+  }
+  function padClose() {
+    if (padTarget) {
+      padTarget.classList.remove('pad-on');
+      padTarget.dispatchEvent(new Event('change', { bubbles: true }));
+      padTarget = null;
+    }
+    padBuf = ''; padUnit = '';
+    if (npadBack) npadBack.classList.remove('on');
+    if (npadEl) npadEl.classList.remove('on');
+  }
+  const padIsOpen = () => !!padTarget;
+
+  /* The first digit after the pad opens *replaces* what was there, the way
+     typing over a selected field does — you tap sleep to answer today's, not
+     to append four digits to yesterday's, and on a capped field like a clock
+     appending simply did nothing at all. Backspace and the dot are edits, not
+     answers, so they keep the seeded value and continue from it. */
+  function padKey(k) {
+    if (!padTarget) return;
+    if (k === 'back')       { padBuf = padBuf.slice(0, -1); padFresh = false; }
+    else if (k === 'clear') { padBuf = ''; padFresh = false; }
+    else if (k === '.') {
+      padFresh = false;
+      if (padKind !== 'decimal' || padBuf.includes('.')) return;
+      padBuf = (padBuf || '0') + '.';
+    } else {
+      if (padFresh) { padBuf = ''; padFresh = false; }
+      const cap = padKind === 'clock' ? 4 : padKind === 'duration' ? 4 : 9;
+      if (padBuf.replace('.', '').length >= cap) return;
+      padBuf = (padKind === 'clock' || padKind === 'duration' || padBuf !== '0') ? padBuf + k : k;
+    }
+    if (window.Prefs) Prefs.tap();
+    padCommit();
+  }
+
+  function padHit(b) {
+    if (b.dataset.npad === 'done') { padClose(); return; }
+    padKey(b.dataset.npad);
+  }
+  let padDownAt = 0;
+  if (npadEl) {
+    npadEl.addEventListener('pointerdown', e => {
+      const b = e.target.closest('[data-npad]');
+      if (!b || b.disabled) return;
+      padDownAt = Date.now();
+      padHit(b);
+    });
+    // a keyboard user pressing Enter on a key: click with no pointerdown before it
+    npadEl.addEventListener('click', e => {
+      const b = e.target.closest('[data-npad]');
+      if (!b || b.disabled || Date.now() - padDownAt < 700) return;
+      padHit(b);
+    });
+  }
+  if (npadBack) npadBack.addEventListener('click', padClose);
+
+  /* Overlay dismissal consumes pointerdown and its synthetic click to prevent
+     taps reaching underlying controls. Blur the active field before showing
+     the pad to dismiss the keyboard; outside taps also dismiss text callouts. */
+  const FOCUSABLE_TEXT = 'input,textarea,select,[contenteditable=""],[contenteditable="true"]';
+  function blurField(el) { try { el.blur(); } catch {} }
+  /* The tap that dismissed something is spent. `preventDefault` stops the
+     synthesised click on most paths and `padSwallowUntil` covers the ones
+     where it does not — a click arriving late, from a touch sequence that had
+     already had a default prevented earlier, is exactly the shape that got
+     through before. */
+  let padSwallowUntil = 0;
+
+  /* The tap that opens the pad, refused: no focus means no keyboard, no
+     scroll-into-view and no viewport resize — see the note above. */
+  document.addEventListener('pointerdown', e => {
+    const el = e.target;
+    const inPad = !!(el && el.closest && el.closest('#npad'));
+    /* A swallow belongs to the gesture that armed it and to no other. A new
+       pointerdown can only arrive after the previous gesture's click, so
+       anything still pending here is stale — and left pending it would eat a
+       fast second tap instead. */
+    padSwallowUntil = 0;
+
+    // 1. the pad is open and this tap is not on it: it closes the pad, and stops
+    if (padIsOpen() && !inPad) {
+      e.preventDefault();
+      e.stopPropagation();
+      padSwallowUntil = Date.now() + 700;
+      padClose();
+      return;
+    }
+    if (inPad) return;
+
+    // 2. a tap outside the focused field ends it — which is what closes the
+    //    platform's own callout, on every screen and in every app
+    const active = document.activeElement;
+    if (active && active !== el && active !== document.body &&
+        active.matches && active.matches(FOCUSABLE_TEXT) &&
+        !(el && el.closest && el.closest('label') && el.closest('label').contains(active))) {
+      blurField(active);
+    }
+
+    // 3. a numeric field: the pad answers it, and nothing else moves while it does
+    if (!el || el.tagName !== 'INPUT') return;
+    const kind = padArm(el);
+    if (!kind || !padWanted()) return;
+    e.preventDefault();
+    padOpen(el, kind);
+  }, true);
+
+  /* A gesture that moved is never a press
+     2.22.3 took the press *wash* off anything scrolled under a finger; this is
+     the other half — the press itself. A finger that lands on a row and then
+     drags is scrolling, and the click the browser synthesises when it lifts is
+     not something the person asked for. The slop is generous: a tap that is a
+     tap does not travel 12px, and a scroll that is a scroll passes it in the
+     first frame. */
+  const TAP_SLOP = 12;
+  let gx = 0, gy = 0, gMoved = false, gDown = false;
+  function gestureMoved() { gMoved = true; }
+  document.addEventListener('pointerdown', e => {
+    gx = e.clientX; gy = e.clientY; gMoved = false; gDown = true;
+  }, true);
+  document.addEventListener('pointermove', e => {
+    if (gMoved) return;
+    if (Math.abs(e.clientX - gx) > TAP_SLOP || Math.abs(e.clientY - gy) > TAP_SLOP) gestureMoved();
+  }, true);
+  // a touch the browser has already claimed for a scroll stops sending pointermove
+  document.addEventListener('touchmove', gestureMoved, { passive: true, capture: true });
+  document.addEventListener('pointercancel', gestureMoved, true);
+  /* A click with no pointer behind it is the keyboard's — Enter on a focused
+     button, or a module calling .click(). It must never inherit the last
+     finger's verdict, so a key press ends whatever gesture was open. */
+  document.addEventListener('keydown', () => { gDown = false; }, true);
+
+  /* Both swallows in one place, before anything else sees the click: the one
+     that closed the pad, and the one that ended a drag. Each is consumed here
+     whether or not it fires, so neither can reach the click after next. */
+  document.addEventListener('click', e => {
+    const inPad = !!(e.target && e.target.closest && e.target.closest('#npad'));
+    const fromPad  = Date.now() < padSwallowUntil;
+    const fromDrag = gDown && gMoved && !inPad;   // the pad's keys fired on pointerdown already
+    padSwallowUntil = 0; gDown = false;
+    if (!fromPad && !fromDrag) return;
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+  /* Reached without a pointer — Tab, or a module calling focus(). The pad opens
+     anyway; the field keeps its focus here, which is right for a keyboard user
+     and is the case `inputmode="none"` is still set for. */
+  document.addEventListener('focusin', e => {
+    const el = e.target;
+    if (npadEl && el && el.closest && el.closest('#npad')) return;   // the pad's own buttons
+    const kind = padArm(el);
+    if (kind && padWanted()) { if (el !== padTarget) padOpen(el, kind); }
+    else if (padIsOpen() && el !== padTarget) padClose();
+  });
+  /* Typed into directly — a physical keyboard, or a module writing the field.
+     The buffer follows the field rather than fighting it. */
+  document.addEventListener('input', e => {
+    if (!padIsOpen() || e.target !== padTarget) return;
+    const seeded = padRead(padKind, padBuf).value;
+    if (String(padTarget.value) !== String(seeded)) { padBuf = padSeed(padTarget, padKind); padPaint(); }
+  });
+  document.addEventListener('keydown', e => {
+    if (!padIsOpen()) return;
+    if (e.key === 'Escape') { const t = padTarget; padClose(); if (t) try { t.blur(); } catch {} }
+  });
+  // switching the pad off in settings hands every armed field its keyboard back
+  if (window.Prefs) Prefs.subscribe(k => {
+    if (k !== 'numpad' && k !== '*') return;
+    if (!padWanted()) padClose();
+    document.querySelectorAll('input[data-pad-im]').forEach(padArm);
+  });
+
+  // Boot: hash wins, then the start-tab preference, then the last tab
+  (function boot() {
+    rebuild();
+    let start = TABS[0];
+    const fromHash = hashTarget().name;
+    const want = pref('startTab', 'last');
+    if (fromHash) start = fromHash;
+    else if (want !== 'last' && TABS.includes(want)) start = want;
+    else { try { const s = localStorage.getItem(TAB_KEY); if (TABS.includes(s)) start = s; } catch {} }
+    // Land on the opening tab without animating in from DO: park the track there
+    // with the transition off and flush it, so go()'s identical transform is a
+    // no-op rather than something to animate towards.
+    index = TABS.indexOf(start);
+    park();
+    go(start);
+    // a link to an app that is out of the bar (#tend) still opens it
+    const raw = location.hash.replace('#', '').split('/')[0];
+    if (!fromHash && hidden().includes(raw)) open(raw);
+  })();
+
+  /* Turning auto-hide off should bring the chrome back immediately, not at the
+     next scroll. */
+  if (window.Prefs) Prefs.subscribe(k => {
+    if (k === 'autoHideChrome' || k === '*') { if (pref('autoHideChrome', true) === false) showChrome(); }
+    /* the app list changed: re-order the slides and stay on the same app if it
+       is still shown, otherwise land on the first one */
+    if (k === 'apps' || k === '*') {
+      const cur = TABS[index];
+      rebuild();
+      go(TABS.includes(cur) ? cur : TABS[0]);
+    }
+  });
+
+  /* What each app answers when search asks. Registered through register()'s
+     `search` hook, so an app that has nothing to offer simply has none. */
+  function searchApps(q) {
+    const out = [];
+    Object.keys(apps).forEach(name => {
+      const fn = apps[name].search;
+      if (!fn) return;
+      // the app's own name is the row's kind unless the hook says otherwise
+      try { (fn(q) || []).forEach(r => out.push(Object.assign({ app: name, kind: name }, r))); }
+      catch (e) { console.error(e); }
+    });
+    return out;
+  }
+
+  /* Shared day-number shuffle. --dn-dir follows navigation direction.
+     Keep state per element so a render during animation cannot replay it
+     based on the outgoing digits still in the DOM. */
+  const dnState = new WeakMap();
+  /* The general form: any number in a `.h-daynum` box, shuffled. `sort` is what
+     decides which way it goes — a date string for LOG and DAY, the number
+     itself for a count — and it is compared against the last one this box was
+     given rather than read back off the DOM, because a re-render mid-shuffle
+     would otherwise compare against the digits on their way out and play the
+     whole thing a second time.
+
+     4.1.1 pulled this out of `dayNum` unchanged so CREATE's in-progress count
+     could have it. The three boxes are the same object doing the same job: a
+     number at the right end of the wordmark's row that moves when it changes. */
+  function rollNum(box, text, sort) {
+    if (!box) return;
+    const cur = box.querySelector('.dn-cur');
+    if (!cur) return;
+    const num = String(text == null ? '' : text);
+    const was = dnState.get(box) || null;
+    if (was && was.num === num) { cur.textContent = num; return; }
+    /* The cleanup timer is part of the per-box state, not a module-level one:
+       LOG, DAY and CREATE each have a box, and a single shared timer meant
+       whichever shuffled second cancelled the first one's cleanup — leaving its
+       outgoing digits in the DOM to pile up behind the live one. */
+    dnState.set(box, { num, sort, timer: was ? was.timer : null });
+    if (!was || cur.textContent === '') { cur.textContent = num; return; }   // first paint: nothing to shuffle from
+    box.style.setProperty('--dn-dir', sort >= was.sort ? 1 : -1);
+    /* Exactly one number is ever on its way out. A finger held on the arrow
+       steps faster than the animation runs, and appending one of these per step
+       stacked them all against the same right edge — a smear of digits behind
+       the live one that only cleared when the stepping stopped. The one before
+       is gone the instant the next leaves, which is also what a deck does. */
+    box.querySelectorAll('.dn-out').forEach(o => o.remove());
+    const out = document.createElement('span');
+    out.className = 'dn-out';
+    out.textContent = cur.textContent;
+    box.appendChild(out);
+    cur.textContent = num;
+    /* Restarted rather than added to: a finger held on the arrow steps faster
+       than the animation runs, and each step must replace the one before it
+       rather than queue behind it. */
+    cur.classList.remove('shuffling'); void cur.offsetWidth; cur.classList.add('shuffling');
+    const st = dnState.get(box);
+    clearTimeout(st.timer);
+    st.timer = setTimeout(() => {
+      box.querySelectorAll('.dn-out').forEach(o => o.remove());
+      cur.classList.remove('shuffling');
+    }, 520);
+  }
+  /* The day of the month, which is what LOG and DAY put there. The ISO string
+     is both the text's source and the thing that says which way time went. */
+  const dayNum = (box, iso) =>
+    rollNum(box, String(Number(String(iso).slice(8, 10)) || ''), String(iso));
+
+  /* The click under every control
+     One listener, on the way down, for the whole page. `pointerdown` rather
+     than `click` because the sound is feedback for the press and not for what
+     it did — a click fires after the finger lifts, which is late enough to
+     sound like a second event — and because a press that turns into a scroll
+     still deserves to have been felt.
+
+     What counts as a control is deliberately narrow: the things that look
+     pressable. A tap on a heading, a card's text or the background is not a
+     control and stays silent, which is what keeps the app from sounding like
+     it is reacting to everything. A disabled control is silent too — nothing
+     happened.
+
+     It is here, once, rather than in the eleven modules: no app carries a line
+     of this, and none of them can end up with a different idea of what a button
+     sounds like. Prefs.sound() is a no-op while the setting is off, so an
+     install that never turns sound on pays a `closest()` per press and nothing
+     else. */
+  const SOUNDS_ON = 'button,a[href],select,summary,input[type=checkbox],input[type=radio],' +
+                    'input[type=range],[role=button],[role=switch],[role=checkbox],[data-act],[data-npad]';
+
+  /* Which of the five moments a press is
+     4.3 gave sound five events instead of three, and the two new ones —
+     completing something, and opening a menu — are decided **here**, off the
+     element under the finger, rather than by an app calling `Prefs.sound()`
+     itself. That rule is the whole reason a tenth app needs no line of audio,
+     and it is not being traded for two more sounds.
+
+     `done` is a tick that is about to go *on*. A checkbox already checked is
+     being un-ticked, which is not completing anything, so it keeps the plain
+     control sound — the sound has to agree with what happens or it is noise.
+     State is read before the press because that is when we are: the handler
+     has not run yet.
+
+     `menu` is anything that opens something over the page: the shell's own
+     dialog and numpad, the settings menu, an overlay's opener. `aria-haspopup`
+     and `aria-expanded="false"` are the two standard ways an element says so
+     and cost nothing to ask.
+
+     Anything else is `tap`. A press is a control first and one of these two
+     second, so the specific test comes first and falls through. */
+  const TICKY = 'input[type=checkbox],[role=checkbox],[role=switch],.ck,.cr-item,.chk,[data-tick]';
+  function pressVoice(el) {
+    if (el.matches(TICKY)) {
+      const on = el.checked === true ||
+                 el.getAttribute('aria-checked') === 'true' ||
+                 el.classList.contains('on');
+      return on ? 'tap' : 'done';
+    }
+    if (el.matches('[aria-haspopup],[data-npad],[data-open],[data-sheet]') ||
+        el.getAttribute('aria-expanded') === 'false') return 'menu';
+    return 'tap';
+  }
+
+  document.addEventListener('pointerdown', e => {
+    if (!window.Prefs || !Prefs.sound) return;
+    const el = e.target && e.target.closest && e.target.closest(SOUNDS_ON);
+    if (!el || el.disabled) return;
+    Prefs.sound(pressVoice(el));
+  }, true);
+
+  /* The cursor, exposed for the harness. Nothing in the app calls these — the
+     keyboard does — but a feature rebuilt three times deserves checks that
+     drive it rather than checks that read its source. */
+  const cursor = {
+    blocks: () => blocksOf(liveView()),
+    items: el => itemsOf(el),
+    ring, shown, level,
+    move: moveSel, enter: enterSel, leave: leaveSel, act: actOnSel, clear: clearSel,
+    at: () => selEl, block: () => selBlock,
+    to: el => { if (selEl) selEl.classList.remove('kb-sel'); selEl = el; if (el) paintSel(); },
+  };
+
+  return { cursor, toast, undo, hideUndo, go, open, hidden, settings, register, badge, alert, showChrome, TABS, APPS, dayNum, rollNum,
+           today, checkDay, confirm: confirmAction, prompt: promptAction, ask,
+           hashTarget, searchApps,
+           numpad: { open: padOpen, close: padClose, key: padKey, kindOf: padKindOf,
+                     isOpen: padIsOpen, target: () => padTarget } };
+})();
