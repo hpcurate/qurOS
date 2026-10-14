@@ -1,79 +1,47 @@
 # Update protocol
 
-Aim for a complete, verified change with little repeated reading or output.
-Run commands from `qurOS/`. Node and the existing `test/` dependencies are enough.
-If dependencies are missing, run `npm install --prefix test` once.
+Run commands from `qurOS/`. Node plus `test/`'s one dependency (jsdom) is all
+it needs: `npm install --prefix test` once.
 
-## Start
+## Before
 
-```powershell
-node test/update.mjs start tools
+Git is the backup (`GIT-PROTOCOL.md` at the workspace root): start from a
+clean tree, or commit what is there first. For something risky, branch.
+
+Keep a short working note in the conversation: **outcome / files / contract
+at risk / how it will be checked**.
+
+## Change
+
+Start with the owning function in `js/`, its selectors in `css/app.css`, and
+its markup (templates live in the JS; `index.html` is only the shell). Read
+QUROS.md by section. Reuse what is there — `Q.ui.sheet`, `Q.ui.screen`,
+`Q.ui.choose`, `Q.m.*` — rather than adding a parallel helper.
+
+## Check
+
+```
+cd test
+npm test          # behaviour (jsdom, fake recognizer) — must pass
+node shots.mjs    # 25 screenshots at 412×915 into test/shots/ (git-ignored)
 ```
 
-Replace `tools` with an app ID, `shell`, `prefs`, `config`, `settings`, `search`,
-`styles`, `tests` or `docs`. Omit it for a general update. This command:
-
-- Copies the entire project, including hidden files, Git history, dependencies
-  and uncommitted work, into a timestamped folder in the workspace's shared
-  `_backups/` (beside `qurOS/`, not inside it); verifies file hashes.
-- Saves the backup path in ignored `.update/session.json` and prints a file map
-  and Git status. Backups are retained; the runner never deletes them.
-
-Run `start` once per new update, before editing. It replaces the active session
-pointer, so do not run it again to check progress. If backup verification fails,
-stop editing and resolve it. This development backup is separate from the app's
-in-browser user-data export.
-
-## Read and implement
-
-Use a compact working note: **outcome / files / contract at risk / validation**.
-Keep it in the conversation; a separate planning document is rarely needed.
-
-Start with the relevant `js/<app>.js` function, `css/<app>.css` selectors and
-markup in `index.html`. Search Config, Prefs and Settings only when they own a
-related value or editor. Read QUROS.md by section: architecture §3, tokens §4,
-storage §5, constraints §6, recipes §7, PLAN export §8, DAY §9. Search old
-release notes only when a regression needs that history.
-
-Make one coherent change. Reuse the existing patterns and avoid unrelated
-cleanup. For a bug, reproduce it and add an outcome-based regression check.
-The legacy harness shares state between sections: filtering its printed test
-names does **not** safely skip earlier setup.
-
-## Validate
-
-```powershell
-node test/update.mjs check --quick
-node test/update.mjs check
-node test/update.mjs check --full
-```
-
-| Change | Default `check` |
+| Change | Check |
 | --- | --- |
-| Markdown/documentation only | Diff whitespace check |
-| App CSS or static images | Syntax where applicable + app boot/theme/panel smoke check |
-| JavaScript, HTML, shared CSS (tokens/themes/shell), manifest, tests, dependencies, or unknown file type | Syntax + smoke check + full existing harness |
-| No changes since the backup | Reports no changes; does not claim tests passed |
+| Docs only | none |
+| CSS / visual | `npm test` + the affected screenshots, looked at |
+| JS, HTML, manifest, sw.js | `npm test`; screenshots if anything renders differently |
+| The recorder, speech, storage, export | `npm test`, plus the matching section's checks extended |
 
-`--quick` runs syntax and smoke checks for iteration; it is not final validation
-for behavior changes. `--full` forces the complete path. Use it for uncertain
-scope, a regression, or shared changes even when the default selects less.
-Comment-only JS edits conservatively select the full suite.
+jsdom cannot see layout and has no real speech or wake lock; say so when a
+change depends on them. A real phone is the only check for speech sessions,
+the wake lock and the share sheet.
 
-Validation compares against the session backup, including new and deleted files;
-it does not confuse earlier uncommitted work with this update. It also checks
-staged and unstaged Git diff whitespace. Full logs live in `.update/`; terminal
-output shows failures and totals. A failing command returns a nonzero exit code.
-For an earlier verified backup: `node test/update.mjs check --base <folder>`.
+## Ship
 
-For visual changes, inspect the affected screen in a browser at the relevant
-phone size and theme/density settings. If unavailable, report that limitation.
-No jsdom result establishes visual correctness. The checks stub networking;
-live Todoist behavior needs separate verification when changed.
-
-## Finish
-
-Review the final diff for accidental changes. Add one brief QUROS.md changelog
-entry: result, reason when useful, validation. Report what changed, what passed,
-the backup path and any remaining limitation. Stop once the required checks
-pass; do not spend tokens restating the plan or dumping successful test lines.
+1. Bump `Q.VERSION` (`js/app.js`) and `VERSION` (`sw.js`) together.
+2. QUROS.md Changelog line; architecture sections if a file, key or contract
+   changed.
+3. For a versioned update, write `updates/yy-mm-dd_update_vX.Y.Z.md` (and the
+   copy in `../_git-push/updates/` when it comes through the Todoist protocol).
+4. Commit `vX.Y.Z - <what>`; push when asked (GitHub Pages serves `main`).

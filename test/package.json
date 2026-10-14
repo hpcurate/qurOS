@@ -1,14 +1,10 @@
 {
   "name": "quros-test",
   "private": true,
-  "description": "jsdom harness for qurOS — not part of the site. cd test && npm install && npm test",
+  "description": "jsdom checks for qurOS — not part of the site. cd test && npm install && npm test",
   "type": "module",
   "scripts": {
-    "test": "node harness.mjs && node flex.mjs",
-    "update": "node update.mjs",
-    "test:update": "node --test update.test.mjs",
-    "flex": "node flex.mjs",
-    "boot": "node boot.mjs"
+    "test": "node app.test.mjs"
   },
   "devDependencies": {
     "jsdom": "^24.1.0"
